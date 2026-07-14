@@ -1,0 +1,218 @@
+{
+ "Cmajor": {
+  "coords": [
+   -4.3385,
+   -4.0297,
+   0.3755
+  ],
+  "root": 0,
+  "quality": "major"
+ },
+ "Cminor": {
+  "coords": [
+   -5.8383,
+   -2.8797,
+   0.5396
+  ],
+  "root": 0,
+  "quality": "minor"
+ },
+ "C#major": {
+  "coords": [
+   2.1182,
+   -5.8018,
+   -7.2173
+  ],
+  "root": 1,
+  "quality": "major"
+ },
+ "C#minor": {
+  "coords": [
+   2.5708,
+   -9.1947,
+   -2.2005
+  ],
+  "root": 1,
+  "quality": "minor"
+ },
+ "Dmajor": {
+  "coords": [
+   1.5688,
+   1.2683,
+   0.9506
+  ],
+  "root": 2,
+  "quality": "major"
+ },
+ "Dminor": {
+  "coords": [
+   0.7618,
+   1.3156,
+   -0.0618
+  ],
+  "root": 2,
+  "quality": "minor"
+ },
+ "Ebmajor": {
+  "coords": [
+   -7.6823,
+   -6.2303,
+   -1.5318
+  ],
+  "root": 3,
+  "quality": "major"
+ },
+ "Ebminor": {
+  "coords": [
+   -3.7424,
+   -5.7946,
+   -6.8624
+  ],
+  "root": 3,
+  "quality": "minor"
+ },
+ "Emajor": {
+  "coords": [
+   3.1875,
+   -5.4621,
+   2.8722
+  ],
+  "root": 4,
+  "quality": "major"
+ },
+ "Eminor": {
+  "coords": [
+   1.2636,
+   -5.6289,
+   3.5646
+  ],
+  "root": 4,
+  "quality": "minor"
+ },
+ "Fmajor": {
+  "coords": [
+   -3.9337,
+   0.1749,
+   -4.1445
+  ],
+  "root": 5,
+  "quality": "major"
+ },
+ "Fminor": {
+  "coords": [
+   -5.5514,
+   0.1428,
+   -3.6764
+  ],
+  "root": 5,
+  "quality": "minor"
+ },
+ "F#major": {
+  "coords": [
+   6.3353,
+   -4.9597,
+   -2.4877
+  ],
+  "root": 6,
+  "quality": "major"
+ },
+ "F#minor": {
+  "coords": [
+   6.0226,
+   -2.1751,
+   -2.9701
+  ],
+  "root": 6,
+  "quality": "minor"
+ },
+ "Gmajor": {
+  "coords": [
+   -2.4416,
+   -1.0557,
+   4.3584
+  ],
+  "root": 7,
+  "quality": "major"
+ },
+ "Gminor": {
+  "coords": [
+   -3.6609,
+   -0.7255,
+   3.8212
+  ],
+  "root": 7,
+  "quality": "minor"
+ },
+ "G#major": {
+  "coords": [
+   -5.5051,
+   -5.9975,
+   -5.8447
+  ],
+  "root": 8,
+  "quality": "major"
+ },
+ "G#minor": {
+  "coords": [
+   -3.3878,
+   -9.7485,
+   4.4515
+  ],
+  "root": 8,
+  "quality": "minor"
+ },
+ "Amajor": {
+  "coords": [
+   2.8273,
+   -3.6743,
+   -1.3117
+  ],
+  "root": 9,
+  "quality": "major"
+ },
+ "Aminor": {
+  "coords": [
+   1.0604,
+   -3.9652,
+   -1.7385
+  ],
+  "root": 9,
+  "quality": "minor"
+ },
+ "Bbmajor": {
+  "coords": [
+   -4.0683,
+   4.6366,
+   -0.5343
+  ],
+  "root": 10,
+  "quality": "major"
+ },
+ "Bbminor": {
+  "coords": [
+   -6.9645,
+   0.1873,
+   -2.9532
+  ],
+  "root": 10,
+  "quality": "minor"
+ },
+ "Bmajor": {
+  "coords": [
+   5.8252,
+   -2.3452,
+   3.7183
+  ],
+  "root": 11,
+  "quality": "major"
+ },
+ "Bminor": {
+  "coords": [
+   4.5385,
+   -1.0656,
+   4.8928
+  ],
+  "root": 11,
+  "quality": "minor"
+ }
+}

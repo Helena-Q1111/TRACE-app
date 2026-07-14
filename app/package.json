@@ -1,0 +1,20 @@
+{
+  "name": "trace-visualizer",
+  "version": "1.0.0",
+  "description": "TRACE Visualizer - 3D Chord Embedding Explorer (desktop app)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "edu.nyu.trace.visualizer",
+    "productName": "TRACE Visualizer",
+    "files": ["main.js", "preload.js", "renderer/**/*"],
+    "win": { "target": "nsis" }
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}
