@@ -46,7 +46,20 @@ body.theme-light { background: #f2f2f5; }
     min-width: 0;
 }
 
-.circle-fifths { display: none; }
+/* Circle-of-fifths tension radar (top-right overlay, transparent) */
+.circle-fifths {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 10;
+    pointer-events: none;
+}
+
+.circle-fifths canvas {
+    width: 220px;
+    height: 220px;
+    display: block;
+}
 
 /* ===== Sidebar (SeeMusic-style collapsible left panel) ===== */
 .sidebar {
@@ -375,13 +388,6 @@ input[type="range"] {
 .export-btn.recording {
     color: #ff5566;
     border-color: #ff5566;
-}
-
-.export-hint {
-    font-size: 10px;
-    color: var(--text-dim);
-    line-height: 1.5;
-    margin-bottom: 10px;
 }
 
 /* Future placeholders */

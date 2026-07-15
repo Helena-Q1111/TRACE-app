@@ -19,7 +19,13 @@ function initScene() {
     );
     camera.position.copy(tonicDisplayPos).add(new THREE.Vector3(0, 0, 34));
 
-    renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    // preserveDrawingBuffer: video export reads the canvas via captureStream;
+    // without it the buffer is cleared after composite and recordings go black
+    renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        powerPreference: 'high-performance',
+        preserveDrawingBuffer: true
+    });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, RENDER_CFG.maxPixelRatio));
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.shadowMap.enabled = true;

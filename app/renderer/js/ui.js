@@ -291,44 +291,5 @@ function bindAppearance() {
     };
 }
 
-// Circle of Fifths (hidden inset, kept from original)
-function drawCircleOfFifths() {
-    const canvas = document.getElementById('circleCanvas');
-    const ctx = canvas.getContext('2d');
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
-    const radius = 80;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Draw circle
-    ctx.strokeStyle = '#444';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
-    ctx.stroke();
-
-    // Pitch names and wedges
-    const pitches = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'Db', 'Ab', 'Eb', 'Bb', 'F'];
-    pitches.forEach((pitch, i) => {
-        const angle = (i / 12) * 2 * Math.PI - Math.PI / 2;
-        const x = centerX + Math.cos(angle) * (radius - 20);
-        const y = centerY + Math.sin(angle) * (radius - 20);
-
-        // Highlight current chord's root (labels are roman now, use absLabel)
-        let color = '#999';
-        if (progression.length > 0) {
-            const abs = progression[currentIndex].absLabel || '';
-            const rootPitch = abs.substring(0, 2);
-            if (rootPitch.startsWith(pitch)) {
-                color = QUALITY_COLORS_HEX[progression[currentIndex].quality] || '#fff';
-            }
-        }
-
-        ctx.fillStyle = color;
-        ctx.font = '12px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(pitch, x, y);
-    });
-}
+// (The old hidden circle-of-fifths inset was replaced by the tension radar
+// in radar.js, which reuses the #circleCanvas element.)

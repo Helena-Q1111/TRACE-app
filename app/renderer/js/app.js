@@ -114,9 +114,14 @@ function animate() {
     updateChordClouds(t);
     updateTrailFlow(t);
     updateOriginMarker(t);
+    updateRadar();
 
     // Render with bloom post-processing
     composer.render();
+
+    // Video export: mirror this freshly rendered frame into the recording
+    // (same task as the render, so the buffer is guaranteed still valid)
+    exportCaptureFrame();
 }
 
 // Initialize
@@ -125,5 +130,6 @@ initCosmos();
 initAudio();
 bindControls();
 initChordSpace();       // tonic reference beacon (no preset constellation)
+initRadar();            // circle-of-fifths tension radar (top-right)
 loadEmbeddingTable();   // full (root, pcs) -> coords table
 animate();

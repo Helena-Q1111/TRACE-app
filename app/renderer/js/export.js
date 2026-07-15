@@ -14,6 +14,9 @@ let _exportAudioDest = null;
 let _exportStopping = false;
 let _exportMime = '';
 let _exportExt = 'webm';
+let _exportRequestFrame = null;   // manual per-frame capture (called after each render)
+let _exportCanvas = null;         // offscreen 2D mirror canvas (fixed even dimensions)
+let _exportCtx = null;
 
 // Prefer MP4, but ONLY with explicit H.264 video + AAC audio: a bare
 // "video/mp4" request makes Chromium mux VP9/Opus into the MP4 container,
@@ -51,8 +54,37 @@ async function startVideoExport() {
     _exportStopping = false;
     setExportBtnState(true);
 
-    // Canvas video stream; Tone.js master routed into an audio track when possible
-    const canvasStream = renderer.domElement.captureStream(60);
+    // Record via an offscreen 2D mirror canvas, NOT the WebGL canvas itself.
+    // Two real failure modes of direct WebGL capture (symptom: audio-only file):
+    // - H.264 encoders require EVEN width/height; the DPR-scaled canvas is
+    //   often odd -> the encoder silently emits zero video frames
+    // - resizing the source canvas mid-recording kills the video track
+    // Each frame is drawImage'd into the mirror right after composer.render().
+    const src = renderer.domElement;
+    const w = Math.min(1920, src.width) & ~1;
+    const h = Math.round(w * src.height / src.width) & ~1;
+    _exportCanvas = document.createElement('canvas');
+    _exportCanvas.width = w;
+    _exportCanvas.height = h;
+    _exportCtx = _exportCanvas.getContext('2d');
+    _exportCtx.drawImage(src, 0, 0, w, h);   // prime the first frame
+    console.log(`Export resolution: ${w}x${h} (source canvas ${src.width}x${src.height})`);
+
+    let canvasStream = _exportCanvas.captureStream(0);
+    const vTrack = canvasStream.getVideoTracks()[0];
+    if (typeof canvasStream.requestFrame === 'function') {
+        _exportRequestFrame = () => canvasStream.requestFrame();
+    } else if (vTrack && typeof vTrack.requestFrame === 'function') {
+        _exportRequestFrame = () => vTrack.requestFrame();
+    } else {
+        // No manual frame API in this browser: fall back to auto 60fps capture
+        // (the mirror updates every rAF via exportCaptureFrame, so frames flow)
+        _exportRequestFrame = null;
+        canvasStream = _exportCanvas.captureStream(60);
+    }
+    console.log(`Frame capture mode: ${_exportRequestFrame ? 'manual requestFrame' : 'auto 60fps'}`);
+
+    // Tone.js master routed into an audio track when possible
     let stream = canvasStream;
     try {
         _exportAudioDest = Tone.getContext().rawContext.createMediaStreamDestination();
@@ -111,8 +143,50 @@ function finishVideoExport() {
     }, 700);
 }
 
+// ---- Byte-level codec self-check on the exported blob ----
+// Scans head+tail for container/codec fourccs and prints a verdict, so a
+// "saves but won't play" file can be diagnosed straight from the console.
+function _findBytes(haystack, ascii) {
+    const needle = Array.from(ascii, ch => ch.charCodeAt(0));
+    outer: for (let i = 0; i <= haystack.length - needle.length; i++) {
+        for (let j = 0; j < needle.length; j++) {
+            if (haystack[i + j] !== needle[j]) continue outer;
+        }
+        return true;
+    }
+    return false;
+}
+
+async function logExportCodecCheck(blob) {
+    try {
+        const head = new Uint8Array(await blob.slice(0, 512 * 1024).arrayBuffer());
+        const tail = new Uint8Array(await blob.slice(Math.max(0, blob.size - 512 * 1024)).arrayBuffer());
+        const has = (tag) => _findBytes(head, tag) || _findBytes(tail, tag);
+
+        const isMp4 = _findBytes(head.slice(0, 16), 'ftyp');
+        const isWebm = head[0] === 0x1A && head[1] === 0x45 && head[2] === 0xDF && head[3] === 0xA3;
+        const lines = [`导出自检: 容器=${isMp4 ? 'MP4' : isWebm ? 'WebM' : '未知!'} 大小=${(blob.size / 1e6).toFixed(1)}MB`];
+
+        if (isMp4) {
+            const h264 = has('avc1') || has('avc3');
+            const vp9 = has('vp09') || has('vpcC');
+            const aac = has('mp4a');
+            const opus = has('Opus') || has('dOps');
+            lines.push(`视频: ${h264 ? 'H.264 ✓' : vp9 ? 'VP9 ✗(普通播放器不认 MP4 内的 VP9)' : '未检出!'}`);
+            lines.push(`音频: ${aac ? 'AAC ✓' : opus ? 'Opus ✗(普通播放器不认 MP4 内的 Opus)' : '未检出(可能无声)'}`);
+            if (!has('moov')) lines.push('警告: 缺少 moov 索引，文件可能截断/未正常收尾');
+        } else if (isWebm) {
+            lines.push(`视频: ${has('V_VP9') ? 'VP9' : has('V_VP8') ? 'VP8' : '?'}  音频: ${has('A_OPUS') ? 'Opus' : '?'}  (WebM 用 VLC/Chrome 播放)`);
+        }
+        console.log(lines.join('\n'));
+    } catch (e) {
+        console.warn('导出自检失败:', e);
+    }
+}
+
 function saveExportedVideo() {
     const blob = new Blob(_exportChunks, { type: _exportMime || 'video/webm' });
+    logExportCodecCheck(blob);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -128,15 +202,26 @@ function saveExportedVideo() {
     }
     _exportRecorder = null;
     _exportChunks = [];
+    _exportRequestFrame = null;
+    _exportCanvas = null;
+    _exportCtx = null;
     isExporting = false;
     _exportStopping = false;
     setExportBtnState(false);
     console.log('Video export saved.');
 }
 
+// Called from the animation loop right after composer.render(): mirror the
+// freshly rendered WebGL frame into the recording canvas and push it.
+function exportCaptureFrame() {
+    if (!isExporting || !_exportCtx) return;
+    _exportCtx.drawImage(renderer.domElement, 0, 0, _exportCanvas.width, _exportCanvas.height);
+    if (_exportRequestFrame) _exportRequestFrame();
+}
+
 function setExportBtnState(recording) {
     const btn = document.getElementById('exportBtn');
     if (!btn) return;
-    btn.textContent = recording ? '● 录制中… 点击提前结束' : '导出视频（当前视角为起点，跟随录制整曲）';
+    btn.textContent = recording ? '● 录制中' : '导出视频';
     btn.classList.toggle('recording', recording);
 }
