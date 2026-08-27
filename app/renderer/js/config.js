@@ -1,12 +1,5 @@
 // ========== CONFIG & SHARED STATE ==========
 
-// Legacy quality colors (kept for the hidden circle-of-fifths inset)
-const QUALITY_COLORS_HEX = {
-    major: "#4466ff", minor: "#ff4444", dominant7: "#44cc44",
-    maj7: "#ffaa44", min7: "#aa44ff", dim: "#ffaa00",
-    aug: "#aa44ff", sus2: "#44aaff", sus4: "#44aaff"
-};
-
 // ---- Chord color system ----
 // Step 1: chord scheme - how chords are grouped into colors
 //   'function3': tonic / subdominant / dominant  (3 colors, needs estimated key)
@@ -33,59 +26,113 @@ const CHORD_PALETTES = {
     }
 };
 
-// Quality -> 4-color group (extended vocabulary)
+// ---- Chord vocabulary: 14 core qualities + a separate tension layer ----
+// Every quality here occurs in Hooktheory, and every extension/alteration is
+// expressed by the SECOND stage instead of getting its own template. The old
+// 29-template dictionary put 9/11/13 variants in the same flat list, which
+// (with `opt` tones that scored for free) made big templates win over triads
+// as soon as any passing tone sounded: measured on 95,423 Hooktheory segments,
+// it inflated the pitch-class set on 49% of them and over-predicted maj13 by
+// 926x. See scripts/eval_chord_recognition.py.
+//
+// Template tones are WEIGHTED, and scoring is cosine similarity, so a template
+// that claims a tone which is not sounding is penalised automatically by its
+// own norm - no complexity-bias constant to tune. The 5th is the one routinely
+// omitted chord tone, so it carries less weight than the defining tones.
+const FIFTH_WEIGHT = 0.7;
+const CORE_QUALITIES = [
+    // triads
+    { quality: 'major',     tones: [[0, 1], [4, 1], [7, FIFTH_WEIGHT]] },
+    { quality: 'minor',     tones: [[0, 1], [3, 1], [7, FIFTH_WEIGHT]] },
+    { quality: 'dim',       tones: [[0, 1], [3, 1], [6, 1]] },
+    { quality: 'aug',       tones: [[0, 1], [4, 1], [8, 1]] },
+    { quality: 'sus2',      tones: [[0, 1], [2, 1], [7, FIFTH_WEIGHT]] },
+    { quality: 'sus4',      tones: [[0, 1], [5, 1], [7, FIFTH_WEIGHT]] },
+    // sevenths
+    { quality: 'maj7',      tones: [[0, 1], [4, 1], [7, FIFTH_WEIGHT], [11, 1]] },
+    { quality: 'dominant7', tones: [[0, 1], [4, 1], [7, FIFTH_WEIGHT], [10, 1]] },
+    { quality: 'min7',      tones: [[0, 1], [3, 1], [7, FIFTH_WEIGHT], [10, 1]] },
+    { quality: 'minMaj7',   tones: [[0, 1], [3, 1], [7, FIFTH_WEIGHT], [11, 1]] },
+    { quality: 'm7b5',      tones: [[0, 1], [3, 1], [6, 1], [10, 1]] },
+    { quality: 'dim7',      tones: [[0, 1], [3, 1], [6, 1], [9, 1]] },
+    { quality: 'dom7sus4',  tones: [[0, 1], [5, 1], [7, FIFTH_WEIGHT], [10, 1]] },
+    { quality: 'dom7sus2',  tones: [[0, 1], [2, 1], [7, FIFTH_WEIGHT], [10, 1]] }
+];
+// Deliberately NOT here, after measuring all three on the corpus:
+//   power (0.16% of Hooktheory) - a two-tone template has a small norm, so it
+//     wins whenever the third is merely QUIET rather than absent. It fired on
+//     25% of a real MIDI's bars and turned Eb-Bb-G into "Eb5"; dropping it
+//     moved exact pitch-class accuracy 87.8% -> 91.5%.
+//   maj6 / min6 (<0.06%) - their pitch-class sets are identical to min7 and
+//     m7b5 a third away, so they can only be told apart by the bass, and min7
+//     is ~130x more common. They stole min7 detections; dropping them moved
+//     accuracy 91.5% -> 92.2% and root accuracy 95.0% -> 96.3%.
+// A bare fifth now reads as a major triad with the third filled in, which is
+// the same bargain already made for the omitted 5th: one recognized chord maps
+// to one table entry, so the 3D point does not jump between voicings.
+
+// Core tone intervals per quality (weights dropped) - the tone set that always
+// enters the embedding lookup, whether or not every member sounded. Filling in
+// an omitted 5th is deliberate: it keeps one recognized chord on one table
+// entry, so the 3D point does not jump between voicings of the same chord.
+const CORE_TONES = (() => {
+    const m = {};
+    CORE_QUALITIES.forEach((q) => { m[q.quality] = q.tones.map(t => t[0]); });
+    return m;
+})();
+
+// ---- Tension layer ----
+// Checked against the chosen root AFTER the core quality is fixed; a tension
+// counts only if it carries real weight in the segment. 7ths are deliberately
+// absent: they are core qualities, so a 7th never arrives as a tension and we
+// never end up labelling a triad "C(♭7)".
+const TENSION_DEFS = [
+    { iv: 1, sym: '♭9' },
+    { iv: 2, sym: '9' },
+    { iv: 3, sym: '♯9' },
+    { iv: 5, sym: '11' },
+    { iv: 6, sym: '♯11' },
+    { iv: 8, sym: '♭13' },
+    { iv: 9, sym: '13' }
+];
+
+// Quality -> 4-color group
 const QUALITY_GROUP = {
     major: 'major', maj7: 'major', sus2: 'major', sus4: 'major',
-    add9: 'major', maj9: 'major', maj13: 'major', maj7s11: 'major',
-    maj11: 'major', maj13s11: 'major',
-    minor: 'minor', min7: 'minor', min9: 'minor', min11: 'minor',
-    min13: 'minor', madd9: 'minor', minMaj7: 'minor',
-    dominant7: 'dominant', dom9: 'dominant', dom11: 'dominant', dom13: 'dominant',
-    dom7b9: 'dominant', dom7s9: 'dominant', dom7s11: 'dominant', dom7b13: 'dominant',
-    dom13s11: 'dominant',
-    dim: 'altered', aug: 'altered', m7b5: 'altered', dim7: 'altered', m11b5: 'altered'
+    minor: 'minor', min7: 'minor', minMaj7: 'minor',
+    dominant7: 'dominant', dom7sus4: 'dominant', dom7sus2: 'dominant',
+    dim: 'altered', aug: 'altered', m7b5: 'altered', dim7: 'altered'
 };
 
-// Display suffixes for chord labels
+// Display suffixes for absolute chord labels
 const QUALITY_SUFFIX = {
     major: '', minor: 'm', dim: 'dim', aug: 'aug', sus2: 'sus2', sus4: 'sus4',
-    dominant7: '7', maj7: 'maj7', min7: 'm7', m7b5: 'm7♭5', dim7: 'dim7', minMaj7: 'mMaj7',
-    dom9: '9', maj9: 'maj9', min9: 'm9', dom7b9: '7♭9', dom7s9: '7♯9',
-    add9: 'add9', madd9: 'madd9',
-    dom11: '11', min11: 'm11', dom7s11: '7♯11', maj7s11: 'maj7♯11',
-    dom13: '13', maj13: 'maj13', min13: 'm13', dom7b13: '7♭13',
-    dom13s11: '13♯11', m11b5: 'm11♭5',
-    maj11: 'maj11', maj13s11: 'maj13♯11'   // diatonic re-flavors (no template needed)
+    dominant7: '7', maj7: 'maj7', min7: 'm7', minMaj7: 'mMaj7',
+    m7b5: 'm7♭5', dim7: 'dim7',
+    dom7sus4: '7sus4', dom7sus2: '7sus2'
 };
 
-// ---- Diatonic 7th defaulting ----
-// When no 7th actually sounds, dominant-vs-major flavor is decided by the
-// CURRENT KEY: e.g. F13 with no 7th in C major becomes Fmaj13 (E is diatonic).
-const DOM_TO_MAJ_FLAVOR = {
-    dominant7: 'maj7', dom9: 'maj9', dom11: 'maj11',
-    dom13: 'maj13', dom7s11: 'maj7s11', dom13s11: 'maj13s11'
-};
-const MAJ_TO_DOM_FLAVOR = {
-    maj7: 'dominant7', maj9: 'dom9', maj13: 'dom13', maj7s11: 'dom7s11',
-    maj11: 'dom11', maj13s11: 'dom13s11'
-};
-
-function adjustSeventhFlavor(seg, bar) {
-    const q = seg.quality;
-    const isDom = q in DOM_TO_MAJ_FLAVOR;
-    const isMaj = q in MAJ_TO_DOM_FLAVOR;
-    if (!isDom && !isMaj) return q;
-    const has7 = seg.pcs.includes((seg.root + 10) % 12) || seg.pcs.includes((seg.root + 11) % 12);
-    if (has7) return q;   // a 7th sounds: trust the analyzer
-    const k = keyAtBar(bar);
-    const tonic = k.mode === 'minor' ? (k.tonic + 3) % 12 : k.tonic;   // relative major
-    const scale = [0, 2, 4, 5, 7, 9, 11].map(iv => (iv + tonic) % 12);
-    const maj7Diatonic = scale.includes((seg.root + 11) % 12);
-    const b7Diatonic = scale.includes((seg.root + 10) % 12);
-    if (maj7Diatonic && isDom) return DOM_TO_MAJ_FLAVOR[q];
-    if (!maj7Diatonic && b7Diatonic && isMaj) return MAJ_TO_DOM_FLAVOR[q];
-    return q;
+// Tension figures, e.g. "(9,13)". Sorted by TENSION_DEFS order so the reading
+// is always ♭9, 9, ♯9, 11, ♯11, ♭13, 13.
+function tensionFigures(chord) {
+    const t = chord.tensions;
+    if (!t || t.length === 0) return '';
+    const order = TENSION_DEFS.map(d => d.iv);
+    const syms = t.slice()
+        .sort((a, b) => order.indexOf(a) - order.indexOf(b))
+        .map(iv => (TENSION_DEFS.find(d => d.iv === iv) || {}).sym)
+        .filter(Boolean);
+    return syms.length ? `(${syms.join(',')})` : '';
 }
+
+// NOTE: the old adjustSeventhFlavor() was removed with the 29-template
+// dictionary. It existed because templates like dom13 kept the ♭7 in `core`
+// while making everything else optional, so a chord with no 7th at all could
+// still come out labelled "13" and needed re-flavoring by key. Under the
+// two-stage recognizer a seventh is only ever labelled when it genuinely
+// sounds (it is a full-weight tone of its own core quality), so the ambiguity
+// cannot arise - and re-flavoring now would desync the label from the
+// pitch-class set that the lookup and the autoencoder panel both display.
 
 // ---- Roman numeral degree (relative to the current key) ----
 const DEGREE_NAMES = {
@@ -98,14 +145,16 @@ function romanDegree(chord, k) {
     let name = DEGREE_NAMES[iv];
     const grp = QUALITY_GROUP[chord.quality] || 'major';
     if (grp === 'minor') name = name.toLowerCase();
-    if (['dim', 'dim7', 'm7b5', 'm11b5'].includes(chord.quality)) name = name.toLowerCase() + '°';
+    if (['dim', 'dim7', 'm7b5'].includes(chord.quality)) name = name.toLowerCase() + '°';
     if (chord.quality === 'aug') name += '+';
     return name;
 }
 
-// Full label including inversion slash (e.g. "Cmaj7/E")
+// Full absolute label: root + quality + tension figures + inversion slash,
+// e.g. "Cmaj7(9,13)/E". Shown in the sidebar list.
 function getChordLabel(chord) {
-    const base = PITCH_NAMES[chord.root] + (QUALITY_SUFFIX[chord.quality] ?? chord.quality);
+    const base = PITCH_NAMES[chord.root] + (QUALITY_SUFFIX[chord.quality] ?? chord.quality)
+        + tensionFigures(chord);
     const bass = chord.bass ?? chord.root;
     return bass !== chord.root ? `${base}/${PITCH_NAMES[bass]}` : base;
 }
@@ -118,23 +167,22 @@ const RNA_SUFFIX = {
     major: '', minor: '', dim: '', aug: '',
     sus2: 'sus2', sus4: 'sus4',
     dominant7: '7', maj7: 'maj7', min7: '7', minMaj7: 'maj7',
-    dim7: '7', m7b5: '7', m11b5: '11',
-    dom9: '9', maj9: 'maj9', min9: '9', add9: 'add9', madd9: 'add9',
-    dom7b9: '7♭9', dom7s9: '7♯9',
-    dom11: '11', min11: '11', maj11: 'maj11',
-    dom7s11: '7♯11', maj7s11: 'maj7♯11',
-    dom13: '13', maj13: 'maj13', min13: '13', dom7b13: '7♭13',
-    dom13s11: '13♯11', maj13s11: 'maj13♯11'
+    dim7: '7', m7b5: '7',
+    dom7sus4: '7sus4', dom7sus2: '7sus2'
 };
 const BASS_MEMBER = {
     3: '3', 4: '3', 7: '5', 10: '7', 11: '7',
     2: '9', 5: '11', 9: '13', 6: '♭5', 8: '♯5'
 };
 
-function romanLabel(chord, k) {
+// Roman-numeral label. `withTensions` is off for the 3D sprites - label space
+// in the scene is tight and "V7(♯11)/3" turns into mush - and on for the
+// sidebar, where the full reading is useful.
+function romanLabel(chord, k, withTensions) {
     let name = romanDegree(chord, k);
-    if (chord.quality === 'm7b5' || chord.quality === 'm11b5') name = name.replace('°', 'ø');
+    if (chord.quality === 'm7b5') name = name.replace('°', 'ø');
     name += RNA_SUFFIX[chord.quality] ?? (QUALITY_SUFFIX[chord.quality] ?? '');
+    if (withTensions) name += tensionFigures(chord);
     const bass = chord.bass ?? chord.root;
     if (bass !== chord.root) {
         const iv = ((bass - chord.root) % 12 + 12) % 12;

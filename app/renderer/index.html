@@ -104,6 +104,12 @@
                         <span class="value-badge" id="fadeValue">16</span>
                     </label>
                     <input type="range" id="fadeSlider" min="4" max="50" value="16">
+
+                    <label class="control-label">自编码器面板 Autoencoder panel</label>
+                    <div class="theme-row" id="aePanelButtons">
+                        <button class="theme-btn active" data-ae="on">显示</button>
+                        <button class="theme-btn" data-ae="off">隐藏</button>
+                    </div>
                 </div>
             </div>
 
@@ -131,6 +137,11 @@
         <canvas id="circleCanvas" width="200" height="200"></canvas>
     </div>
 
+    <!-- Autoencoder panel: how the current chord's 3D coordinate is computed -->
+    <div class="ae-panel" id="aePanel">
+        <canvas id="aeCanvas"></canvas>
+    </div>
+
     <!-- Vendored libraries (offline-capable) -->
     <script src="vendor/three.min.js"></script>
     <script src="vendor/CopyShader.js"></script>
@@ -153,6 +164,7 @@
     <script src="js/playback.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/radar.js"></script>
+    <script src="js/aeviz.js"></script>
     <script src="js/export.js"></script>
     <script src="js/app.js"></script>
 </body>

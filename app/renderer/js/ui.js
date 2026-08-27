@@ -12,7 +12,7 @@ function updateUI() {
             ? `·${bv % 1 ? bv.toFixed(1) : bv.toFixed(0)}` : '';
         div.innerHTML = `
             <span class="dot" style="background:${getChordColorHexStr(chord)}"></span>
-            <span class="chord-name">Bar ${chord.bar || idx + 1}${beatTag}: ${chord.absLabel || chord.label || '?'}</span>
+            <span class="chord-name">Bar ${chord.bar || idx + 1}${beatTag}: ${chord.absLabel || chord.labelFull || chord.label || '?'}</span>
         `;
         div.onclick = () => {
             if (isExporting) return;   // no seeking while recording
@@ -42,8 +42,10 @@ function updateUI() {
         document.getElementById('liveD').textContent =
             prev ? euclideanDistance(prev.coords, cur.coords).toFixed(2) : '—';
         document.getElementById('liveT').textContent = Math.hypot(...cur.coords).toFixed(2);
-        document.getElementById('liveDegree').textContent = romanDegree(cur, keyAtBar(cur.bar));
+        document.getElementById('liveDegree').textContent = cur.labelFull
+            || romanDegree(cur, keyAtBar(cur.bar));
     }
+    if (typeof markAeVizDirty === 'function') markAeVizDirty();
 }
 
 // Single entry points for play/pause: guard against repeated triggers
@@ -289,6 +291,15 @@ function bindAppearance() {
         fadeValue.textContent = fadeBars >= FADE_OFF ? '∞' : fadeBars;
         applyFadeSetting();
     };
+
+    document.querySelectorAll('#aePanelButtons .theme-btn').forEach((btn) => {
+        btn.onclick = () => {
+            document.querySelectorAll('#aePanelButtons .theme-btn')
+                .forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            setAeVizVisible(btn.dataset.ae === 'on');
+        };
+    });
 }
 
 // (The old hidden circle-of-fifths inset was replaced by the tension radar

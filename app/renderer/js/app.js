@@ -115,6 +115,7 @@ function animate() {
     updateTrailFlow(t);
     updateOriginMarker(t);
     updateRadar();
+    updateAeViz();
 
     // Render with bloom post-processing
     composer.render();
@@ -131,5 +132,6 @@ initAudio();
 bindControls();
 initChordSpace();       // tonic reference beacon (no preset constellation)
 initRadar();            // circle-of-fifths tension radar (top-right)
+initAeViz();            // autoencoder panel (bottom-right)
 loadEmbeddingTable();   // full (root, pcs) -> coords table
 animate();

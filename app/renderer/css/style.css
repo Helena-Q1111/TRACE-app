@@ -61,6 +61,21 @@ body.theme-light { background: #f2f2f5; }
     display: block;
 }
 
+/* Autoencoder panel (bottom-right overlay). Unlike the radar this one takes
+   pointer events: its view tabs and window controls are drawn into the canvas.
+   The scene keeps the mouse everywhere outside the panel rectangle. */
+.ae-panel {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 10;
+}
+
+.ae-panel canvas {
+    display: block;
+    cursor: pointer;
+}
+
 /* ===== Sidebar (SeeMusic-style collapsible left panel) ===== */
 .sidebar {
     position: relative;

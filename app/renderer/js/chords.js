@@ -162,42 +162,34 @@ async function loadEmbeddingTable() {
     }
 }
 
-// Canonical chord tones per quality (core+opt of the analyzer templates).
-// The embedding lookup uses these instead of the raw sounding pcs: the same
-// recognized chord always hits the same table entry, so coords no longer
-// jitter when a 5th is omitted or a passing tension sneaks into the chroma.
-const CANONICAL_TONES = (() => {
-    const m = {};
-    CHORD_TEMPLATES.forEach((t) => {
-        m[t.quality] = [...new Set(t.core.concat(t.opt))].sort((a, b) => a - b);
-    });
-    // Diatonic re-flavors from adjustSeventhFlavor (no analyzer template)
-    m.maj11 = [0, 2, 4, 5, 7, 11];
-    m.maj13s11 = [0, 2, 4, 6, 7, 9, 11];
-    return m;
-})();
-
-// (root, quality) -> coords via the canonical template tones, transposing to
-// C by the key at this bar (embeddings are C-based: in A major shift +3).
-// Falls back to the sounding pcs when the quality has no template.
-function lookupEmbedding(root, bass, pcs, bar, quality) {
+// The recognizer already emits the exact lookup tone set (core tones + the
+// confirmed tensions + the bass), so the lookup only has to transpose it into
+// the C-based frame the embeddings live in (in A major, shift +3).
+// Returns {root, bass, pcs} in that frame - also what aeviz.js encodes to
+// rebuild the 15D model input, so both go through one definition.
+function transposedChordKey(root, bass, pcs, bar) {
     const shift = transposeShiftForKey(keyAtBar(bar));
-    const b0 = bass ?? root;
-    let usePcs = pcs;
-    const ivs = CANONICAL_TONES[quality];
-    if (ivs) {
-        const set = new Set(ivs.map(iv => (root + iv) % 12));
-        set.add(b0);   // inversion bass is always part of the lookup set
-        usePcs = [...set];
-    }
     const r = (root + shift) % 12;
-    const b = (b0 + shift) % 12;
-    const keyOf = (arr, bassPc) =>
-        `${r}:${bassPc}:[${arr.map(pc => (pc + shift) % 12).sort((x, y) => x - y).join(', ')}]`;
-    let coords = embeddingTable[keyOf(usePcs, b)];
-    if (!coords) coords = embeddingTable[keyOf(pcs, b)];       // sounding pcs
-    if (!coords && b !== r) coords = embeddingTable[keyOf(usePcs, r)];  // root position
-    if (!coords) console.warn(`Embedding not found: ${keyOf(usePcs, b)}`);
+    const b = ((bass ?? root) + shift) % 12;
+    const set = new Set(pcs.map(pc => (pc + shift) % 12));
+    set.add(r);
+    set.add(b);
+    return { root: r, bass: b, pcs: [...set].sort((x, y) => x - y) };
+}
+
+function embeddingKeyString(k) {
+    return `${k.root}:${k.bass}:[${k.pcs.join(', ')}]`;
+}
+
+// The table is exhaustive over (root, bass, pcs), so the first lookup always
+// hits; the root-position fallback only guards against a truncated table.
+function lookupEmbedding(root, bass, pcs, bar) {
+    const k = transposedChordKey(root, bass, pcs, bar);
+    let coords = embeddingTable[embeddingKeyString(k)];
+    if (!coords && k.bass !== k.root) {
+        coords = embeddingTable[embeddingKeyString({ ...k, bass: k.root })];
+    }
+    if (!coords) console.warn(`Embedding not found: ${embeddingKeyString(k)}`);
     return coords ? coords.slice() : [0, 0, 0];
 }
 
@@ -221,12 +213,9 @@ function analyzeAndBuildProgression() {
 // recognition is key-independent, only the embedding lookup shifts.
 function rebuildProgressionFromAnalysis() {
     progression = analysisSegments.map(seg => {
-        // Diatonic 7th default: no sounding 7th -> flavor by the current key
-        // (pcs unchanged, so the embedding lookup is unaffected)
-        const quality = adjustSeventhFlavor(seg, seg.bar);
+        const quality = seg.quality;
         const adjusted = { ...seg, quality, bass: seg.bass ?? seg.root };
-        // Display label is the roman-numeral analysis (relative to the key at
-        // this bar); the absolute name is kept for tooltips/debugging.
+        const key = keyAtBar(seg.bar);
         return {
             bar: seg.bar,
             beatInBar: seg.beatInBar,
@@ -234,11 +223,17 @@ function rebuildProgressionFromAnalysis() {
             root: seg.root,
             bass: seg.bass ?? seg.root,
             quality: quality,
+            tensions: seg.tensions || [],
             pcs: seg.pcs,
-            label: romanLabel(adjusted, keyAtBar(seg.bar)),
+            soundingPcs: seg.soundingPcs || seg.pcs,
+            // 3D sprite label: core quality only, tensions would not fit
+            label: romanLabel(adjusted, key, false),
+            // sidebar: the full reading, tension figures included
+            labelFull: romanLabel(adjusted, key, true),
             absLabel: getChordLabel(adjusted),
-            coords: lookupEmbedding(seg.root, seg.bass, seg.pcs, seg.bar, quality),
-            offKey: isOffKey(seg.pcs, seg.bar)
+            coords: lookupEmbedding(seg.root, seg.bass, seg.pcs, seg.bar),
+            // off-key is judged on what actually rang, not on a filled-in 5th
+            offKey: isOffKey(seg.soundingPcs || seg.pcs, seg.bar)
         };
     });
 

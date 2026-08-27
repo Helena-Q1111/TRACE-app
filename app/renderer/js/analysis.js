@@ -1,65 +1,58 @@
 // ========== FRONTEND CHORD ANALYSIS ==========
-// Template scoring (HarmAn-style S = P - N - M) over HALF-BEAT quantized
-// weighted chroma, per-bar DP segmentation (<=4 segments/bar), strict merging.
-// Precision: chord boundaries resolve to half-beat positions (8th notes in x/4);
-// the per-bar cap of 4 fundamentally different chords is kept as a hard limit.
-
-// Extended template dictionary: triads, 7ths, 9/11/13 and alterations.
-// core = defining tones (missing -> heavy penalty); opt = commonly omitted
-// tones (5th, inner extensions) that score when present but never penalize.
-// Small complexity tiebreak prefers the simplest template that explains the notes.
-const CHORD_TEMPLATES = [
-    // triads
-    { quality: 'major',   core: [0, 4, 7],  opt: [] },
-    { quality: 'minor',   core: [0, 3, 7],  opt: [] },
-    { quality: 'dim',     core: [0, 3, 6],  opt: [] },
-    { quality: 'aug',     core: [0, 4, 8],  opt: [] },
-    { quality: 'sus2',    core: [0, 2, 7],  opt: [] },
-    { quality: 'sus4',    core: [0, 5, 7],  opt: [] },
-    // sevenths
-    { quality: 'dominant7', core: [0, 4, 10], opt: [7] },
-    { quality: 'maj7',      core: [0, 4, 11], opt: [7] },
-    { quality: 'min7',      core: [0, 3, 10], opt: [7] },
-    { quality: 'm7b5',      core: [0, 3, 6, 10], opt: [] },
-    { quality: 'dim7',      core: [0, 3, 6, 9],  opt: [] },
-    { quality: 'minMaj7',   core: [0, 3, 11], opt: [7] },
-    // ninths
-    { quality: 'dom9',   core: [0, 4, 10, 2], opt: [7] },
-    { quality: 'maj9',   core: [0, 4, 11, 2], opt: [7] },
-    { quality: 'min9',   core: [0, 3, 10, 2], opt: [7] },
-    { quality: 'dom7b9', core: [0, 4, 10, 1], opt: [7] },
-    { quality: 'dom7s9', core: [0, 4, 10, 3], opt: [7] },
-    { quality: 'add9',   core: [0, 4, 2],     opt: [7] },
-    { quality: 'madd9',  core: [0, 3, 2],     opt: [7] },
-    // elevenths
-    { quality: 'dom11',   core: [0, 10, 5],    opt: [7, 2, 4] },
-    { quality: 'min11',   core: [0, 3, 10, 5], opt: [7, 2] },
-    { quality: 'dom7s11', core: [0, 4, 10, 6], opt: [7, 2] },
-    { quality: 'maj7s11', core: [0, 4, 11, 6], opt: [7, 2] },
-    // thirteenths
-    { quality: 'dom13',    core: [0, 4, 10, 9],    opt: [7, 2, 5] },
-    { quality: 'maj13',    core: [0, 4, 11, 9],    opt: [7, 2] },
-    { quality: 'min13',    core: [0, 3, 10, 9],    opt: [7, 2, 5] },
-    { quality: 'dom7b13',  core: [0, 4, 10, 8],    opt: [7] },
-    // Note: literal b11 (=M3) and #13 (=b7) are enharmonic duplicates of chord
-    // tones in pitch-class space; the distinguishable neighbors are added instead:
-    { quality: 'dom13s11', core: [0, 4, 10, 6, 9], opt: [7, 2] },   // 13#11 (Lydian dominant)
-    { quality: 'm11b5',    core: [0, 3, 6, 10, 5], opt: [] }        // half-dim 11
-];
+// Two-stage recognition over whole-beat quantized weighted chroma, with per-bar
+// DP segmentation (<=4 segments/bar) and strict merging.
+//
+//   stage 1  pick (root, core quality) by weighted-template COSINE similarity
+//   stage 2  attach the tensions that are actually sounding
+//
+// The vocabulary (CORE_QUALITIES / TENSION_DEFS) lives in config.js.
+//
+// Why cosine and not the old HarmAn-style S = P - N - M: with M = total - P
+// that score expands to 2P - total - ..., so moving one pitch class from
+// outside the template to inside swings the score by TWICE its weight, while
+// the complexity bias resisting it was only ~0.005 x total. Any passing tone
+// therefore won, and templates carrying free `opt` tones absorbed it. Cosine
+// self-regularizes instead: claiming a tone that is not sounding raises the
+// template norm and lowers the score. Measured effect on 95,423 Hooktheory
+// segments - exact pitch-class set 50.8% -> 88.8%, invented tones 49.2% -> 7.1%
+// (scripts/eval_chord_recognition.py).
 
 const ANALYSIS_CFG = {
-    gridPerBeat: 1,          // whole-beat boundary resolution (was half-beat)
+    gridPerBeat: 1,          // whole-beat boundary resolution
     maxSegmentsPerBar: 4,    // hard cap on chord changes per bar
     segmentPenalty: 0.45,    // cost per extra segment
-    missingPenalty: 0.3,     // penalty per missing CORE tone
-    complexityBias: 0.02,    // slight preference for simpler templates
-    rootBassBonus: 0.16,     // bonus when root == bass (raised: fewer inversions)
+    rootBassBonus: 0.05,     // cosine-scale bonus when root == the segment bass
     inversionMinRatio: 0.55, // bass must carry this much weight (vs max) to flag inversion
-    tensionKeepRatio: 0.55,  // keep a non-template tone only if this strong vs max
+    // A tension counts when it is at least this strong relative to the MEAN
+    // weight of the chord's own sounding tones. Deliberately not a fraction of
+    // the peak: bassBoost, the downbeat weight and the bass note's longer
+    // duration all multiply together, so in real MIDI the bass pitch class runs
+    // ~3.4x the next one and a peak-relative threshold can never be cleared -
+    // the whole tension stage goes silent. Measured on 129,410 Hooktheory
+    // segments, switching the reference lifts accuracy on genuinely extended
+    // chords from 69.3% to 76.1% at the same inflation.
+    tensionKeepRatio: 0.75,
     metricStrong: 1.5,       // downbeat weight
     metricMid: 1.2,          // mid-bar beat weight (4/4 beat 3)
     bassBoost: 1.6           // bass pitch class weight boost
 };
+
+// Precomputed (root, quality) templates: pitch-class weight vector + its norm.
+const SCORING_TEMPLATES = (() => {
+    const out = [];
+    for (let root = 0; root < 12; root++) {
+        for (const q of CORE_QUALITIES) {
+            const w = new Float32Array(12);
+            let sq = 0;
+            for (const [iv, weight] of q.tones) {
+                w[(root + iv) % 12] = weight;
+                sq += weight * weight;
+            }
+            out.push({ root, quality: q.quality, w, norm: Math.sqrt(sq) });
+        }
+    }
+    return out;
+})();
 
 // notes: [{startBeat, endBeat, pitch}], returns segments:
 // [{startBeat, endBeat, durBeats, bar, beatInBar, root, quality, pcs}]
@@ -84,17 +77,25 @@ function analyzeMidiToSegments(notes, bpb) {
             if (n.pitch < unitBassPitch[u]) unitBassPitch[u] = n.pitch;
         }
     });
-    for (let u = 0; u < totalUnits; u++) {
-        if (unitBassPitch[u] !== Infinity) unitChroma[u][unitBassPitch[u] % 12] *= ANALYSIS_CFG.bassBoost;
-    }
-
+    // The bass boost is NOT folded into unitChroma: it exists to help stage 1
+    // find the root, and letting it leak into every later measurement is what
+    // made the bass pitch class dominate the segment (see tensionKeepRatio).
+    // Two chroma vectors are accumulated per segment instead:
+    //   w      - bass-boosted, used only to pick (root, quality)
+    //   wPlain - what actually sounded, used to judge tone presence
     // --- Score one unit range [s, e) against all (root, template) pairs ---
     function segmentInfo(s, e) {
         const w = new Float32Array(12);
+        const wPlain = new Float32Array(12);
         const bassTime = new Float32Array(12);   // time each pc spends as the bass
         for (let u = s; u < e; u++) {
-            for (let pc = 0; pc < 12; pc++) w[pc] += unitChroma[u][pc];
-            if (unitBassPitch[u] !== Infinity) bassTime[unitBassPitch[u] % 12]++;
+            const bassPcOfUnit = unitBassPitch[u] !== Infinity ? unitBassPitch[u] % 12 : -1;
+            for (let pc = 0; pc < 12; pc++) {
+                const v = unitChroma[u][pc];
+                wPlain[pc] += v;
+                w[pc] += pc === bassPcOfUnit ? v * ANALYSIS_CFG.bassBoost : v;
+            }
+            if (bassPcOfUnit >= 0) bassTime[bassPcOfUnit]++;
         }
         const total = w.reduce((a, x) => a + x, 0);
         if (total < 1e-6) return { empty: true, score: 0 };
@@ -104,50 +105,71 @@ function analyzeMidiToSegments(notes, bpb) {
         for (let pc = 0; pc < 12; pc++) {
             if (bassTime[pc] > bassBest) { bassBest = bassTime[pc]; bassPc = pc; }
         }
-        const missUnit = total / 4;
+        // ---- Stage 1: (root, core quality) by weighted-template cosine ----
+        // Cosine is scale-free, so the DP score is re-scaled by the segment's
+        // energy: a long segment explaining a lot of weight must outscore two
+        // short ones, exactly as under the old P - N - M score.
+        let wNorm = 0;
+        for (let pc = 0; pc < 12; pc++) wNorm += w[pc] * w[pc];
+        wNorm = Math.sqrt(wNorm) || 1e-9;
 
         let best = null;
-        for (let root = 0; root < 12; root++) {
-            if (w[root] < 1e-6) continue;
-            for (const tpl of CHORD_TEMPLATES) {
-                const corePcs = tpl.core.map(iv => (root + iv) % 12);
-                const optPcs = tpl.opt.map(iv => (root + iv) % 12);
-                let P = 0, Nmiss = 0, M = 0;
-                for (let pc = 0; pc < 12; pc++) {
-                    if (corePcs.includes(pc)) {
-                        if (w[pc] > 1e-6) P += w[pc]; else Nmiss++;   // core missing = penalized
-                    } else if (optPcs.includes(pc)) {
-                        if (w[pc] > 1e-6) P += w[pc];                  // optional: free to omit
-                    } else {
-                        M += w[pc];
-                    }
-                }
-                let score = P - ANALYSIS_CFG.missingPenalty * Nmiss * missUnit - M
-                    - ANALYSIS_CFG.complexityBias * total * ((tpl.core.length + tpl.opt.length) / 12);
-                if (root === bassPc) score += ANALYSIS_CFG.rootBassBonus * total;
-                if (!best || score > best.score) {
-                    best = { score, root, quality: tpl.quality, tplPcs: corePcs.concat(optPcs) };
-                }
-            }
+        for (const tpl of SCORING_TEMPLATES) {
+            if (w[tpl.root] < 1e-6) continue;   // the root must sound
+            let dot = 0;
+            for (let pc = 0; pc < 12; pc++) dot += w[pc] * tpl.w[pc];
+            let sim = dot / (wNorm * tpl.norm);
+            if (tpl.root === bassPc) sim += ANALYSIS_CFG.rootBassBonus;
+            if (!best || sim > best.sim) best = { sim, root: tpl.root, quality: tpl.quality };
+        }
+        if (!best) return { empty: true, score: 0 };
+
+        // ---- Stage 2: which tensions are genuinely sounding ----
+        // Reference = the mean weight of this chord's own sounding tones, so a
+        // tension is kept when it is comparable to the rest of the chord rather
+        // than to whatever the loudest pitch class happens to be.
+        const maxPlain = Math.max(...wPlain);
+        const coreIvs = CORE_TONES[best.quality];
+        const corePcs = coreIvs.map(iv => (best.root + iv) % 12);
+        const coreSet = new Set(corePcs);
+        let refSum = 0, refN = 0;
+        corePcs.forEach((pc) => { if (wPlain[pc] > 1e-6) { refSum += wPlain[pc]; refN++; } });
+        const ref = refN > 0 ? refSum / refN : maxPlain;
+        const tensions = [];
+        for (const t of TENSION_DEFS) {
+            const pc = (best.root + t.iv) % 12;
+            if (coreSet.has(pc)) continue;
+            if (wPlain[pc] >= ANALYSIS_CFG.tensionKeepRatio * ref) tensions.push(t.iv);
         }
 
-        const maxW = Math.max(...w);
-        const pcs = new Set([best.root]);
-        best.tplPcs.forEach(pc => { if (w[pc] > 1e-6) pcs.add(pc); });
-        for (let pc = 0; pc < 12; pc++) {
-            if (!best.tplPcs.includes(pc) && w[pc] >= ANALYSIS_CFG.tensionKeepRatio * maxW) pcs.add(pc);
-        }
-        // Inversion: sounding bass differs from the chord root - only flagged
-        // when the bass is a real template tone AND carries substantial weight
+        // Inversion: the segment's bass differs from the root - only flagged
+        // when the bass is a chord tone AND carries substantial weight. Judged
+        // on wPlain: against the boosted chroma the bass would always pass.
+        const tonePcs = new Set(corePcs);
+        tensions.forEach(iv => tonePcs.add((best.root + iv) % 12));
         let bass = best.root;
-        if (bassPc >= 0 && bassPc !== best.root
-            && best.tplPcs.includes(bassPc)
-            && w[bassPc] >= ANALYSIS_CFG.inversionMinRatio * maxW) {
+        if (bassPc >= 0 && bassPc !== best.root && tonePcs.has(bassPc)
+            && wPlain[bassPc] >= ANALYSIS_CFG.inversionMinRatio * maxPlain) {
             bass = bassPc;
         }
+        tonePcs.add(bass);
+
+        // `pcs` is the embedding lookup key: core tones (5th included even when
+        // omitted, so one recognized chord always maps to one table entry) plus
+        // confirmed tensions plus the bass. `soundingPcs` is what actually rang,
+        // used for off-key detection where inventing a 5th would be misleading.
+        const soundingPcs = [];
+        for (let pc = 0; pc < 12; pc++) if (wPlain[pc] > 1e-6) soundingPcs.push(pc);
+
         return {
-            empty: false, score: best.score, root: best.root, bass: bass,
-            quality: best.quality, pcs: [...pcs].sort((a, b) => a - b)
+            empty: false,
+            score: total * best.sim,
+            root: best.root,
+            bass: bass,
+            quality: best.quality,
+            tensions: tensions,
+            pcs: [...tonePcs].sort((a, b) => a - b),
+            soundingPcs: soundingPcs
         };
     }
 
@@ -195,13 +217,15 @@ function analyzeMidiToSegments(notes, bpb) {
             if (seg.empty) return;
             rawSegments.push({
                 startBeat: (s0 + a) / G, endBeat: (s0 + b) / G,
-                root: seg.root, bass: seg.bass, quality: seg.quality, pcs: seg.pcs
+                root: seg.root, bass: seg.bass, quality: seg.quality,
+                tensions: seg.tensions, pcs: seg.pcs, soundingPcs: seg.soundingPcs
             });
         });
     }
 
     // --- Merge adjacent segments ONLY when truly identical ---
-    // (same root + bass + quality + exact pitch-class set)
+    // (same root + bass + quality + exact lookup pitch-class set; equal pcs
+    // with equal root/quality implies equal tensions, so those need no test)
     const merged = [];
     rawSegments.forEach((seg) => {
         const prev = merged[merged.length - 1];
@@ -210,6 +234,9 @@ function analyzeMidiToSegments(notes, bpb) {
             && prev.pcs.join(',') === seg.pcs.join(',')
             && Math.abs(prev.endBeat - seg.startBeat) < 1e-6) {
             prev.endBeat = seg.endBeat;
+            // off-key detection should see everything that rang across the span
+            prev.soundingPcs = [...new Set(prev.soundingPcs.concat(seg.soundingPcs))]
+                .sort((a, b) => a - b);
         } else {
             merged.push({ ...seg });
         }
