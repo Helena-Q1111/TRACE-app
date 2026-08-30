@@ -292,6 +292,27 @@ function bindAppearance() {
         applyFadeSetting();
     };
 
+    document.querySelectorAll('#anchorButtons .theme-btn').forEach((btn) => {
+        btn.onclick = () => {
+            document.querySelectorAll('#anchorButtons .theme-btn')
+                .forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            setAnchorsVisible(btn.dataset.anchor === 'on');
+        };
+    });
+
+    // Timbre: the voice is built on first pick, so disable the row until the
+    // swap lands - otherwise a fast double-click can leave the wrong button lit.
+    document.querySelectorAll('#timbreButtons .theme-btn').forEach((btn) => {
+        btn.onclick = async () => {
+            const row = document.querySelectorAll('#timbreButtons .theme-btn');
+            row.forEach(b => { b.classList.remove('active'); b.disabled = true; });
+            btn.classList.add('active');
+            try { await setTimbre(btn.dataset.timbre); }
+            finally { row.forEach(b => { b.disabled = false; }); }
+        };
+    });
+
     document.querySelectorAll('#aePanelButtons .theme-btn').forEach((btn) => {
         btn.onclick = () => {
             document.querySelectorAll('#aePanelButtons .theme-btn')

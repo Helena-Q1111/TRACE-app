@@ -1,5 +1,43 @@
 // ========== CONFIG & SHARED STATE ==========
 
+// ---- Scene scale ----
+// Everything drawn INSIDE the latent space - chord spheres, their particle
+// clouds, labels, path tubes, landmark beacons - is sized off this factor, and
+// the camera's start distance came down with it.
+//
+// Why: the boundary cage's near wall is only ~13 units from the scene origin
+// (44.8 at its far corner), while the camera used to orbit the current chord at
+// radius 34. That put the viewpoint OUTSIDE the boundary looking in, which is
+// exactly why the space read as cramped. Shrinking the contents and moving the
+// camera inside makes the cage a room you are standing in. The two changes go
+// together: at a third of the distance, unshrunk objects would look three times
+// larger and swallow the view.
+const SCENE_SCALE = 0.3;
+const CAMERA_START_RADIUS = 9;
+const CAMERA_MIN_RADIUS = 0.4;
+// Set from the boundary once it is built (landmarks.js): the camera should not
+// be able to zoom out through the wall.
+let cameraMaxRadius = 45;
+
+// ---- Boundary ----
+// A REGULAR icosahedron centred on the tonic, not a hull of the chord cloud.
+// The hull version hugged the music - the median chord cleared its wall by 4.4
+// display units and a tenth of them by under 0.7 - so any zoom put the camera
+// outside the boundary. Sizing a regular solid so its INRADIUS reaches the most
+// remote chord gives an arena that actually contains the vocabulary.
+//
+// For a regular icosahedron inradius / circumradius = 0.7557613, and
+// THREE.IcosahedronGeometry takes the CIRCUMradius, hence the division.
+const ICOSA_INRADIUS_RATIO = 0.7557613;
+const CAGE_MARGIN = 1.06;          // a little air beyond the furthest chord
+
+// ---- Distance fog ----
+// Depth cue for the interior: the far side of the cage and older path segments
+// recede instead of crowding the near geometry. The sky (stars, nebulae, dust)
+// opts OUT via material.fog = false - fogging it would just empty the sky.
+const FOG_NEAR = 5;
+const FOG_FAR = 95;                // the far wall of the boundary is ~85 away
+
 // ---- Chord color system ----
 // Step 1: chord scheme - how chords are grouped into colors
 //   'function3': tonic / subdominant / dominant  (3 colors, needs estimated key)
@@ -80,6 +118,15 @@ const CORE_TONES = (() => {
     CORE_QUALITIES.forEach((q) => { m[q.quality] = q.tones.map(t => t[0]); });
     return m;
 })();
+
+// The interval that a suspended quality puts where the 3rd would be. Used by
+// the voicing check in analysis.js: if that pitch class only sounds an octave
+// or more above the root, it is a 9th or an 11th on top of an ordinary triad,
+// not a suspension, and the chord should be re-read without the sus templates.
+const SUSPENDED_INTERVAL = {
+    sus2: 2, dom7sus2: 2,
+    sus4: 5, dom7sus4: 5
+};
 
 // ---- Tension layer ----
 // Checked against the chosen root AFTER the core quality is fixed; a tension
@@ -294,6 +341,12 @@ let starDensity = 1.0;
 
 // Path line width factor: 1.0 = current thickness (slider middle)
 let lineWidthFactor = 1.0;
+// Deliberately NOT scaled by SCENE_SCALE. Everything else shrank by 0.3 while
+// the camera came 3.8x closer, which keeps apparent size constant - but the
+// path tubes were already hairlines, so the four tension tiers all collapsed
+// into the 0.05-1.0 pixel range and read as one texture. At this radius the
+// tiers span roughly 0.3 -> 3 pixels at the default camera distance, and the
+// boldest is about 1.8x a chord sphere's radius.
 const BASE_TUBE_RADIUS = 0.011;
 
 // ---- Tension contrast remap (fixed sinh radial stretch around the origin) ----
@@ -317,16 +370,38 @@ function displayCoords(c) {
     return [c[0] * s, c[1] * s, c[2] * s];
 }
 
+// Inverse of displayCoords. The boundary is built directly in display space so
+// that it renders as a true regular solid; this maps its corners back into
+// model units so their distance ticks can be read in the same scale as the
+// sidebar's d/t metrics.
+function inverseDisplayCoords(c) {
+    const rd = Math.hypot(c[0], c[1], c[2]);
+    if (rd < 1e-6) return [c[0], c[1], c[2]];
+    const r = Math.asinh(rd / DISPLAY_SCALE) / REMAP_ALPHA;
+    const s = r / rd;
+    return [c[0] * s, c[1] * s, c[2] * s];
+}
+
 // ---- Tension tiers for path segments ----
 // Band 1 merges inversions + extensions/quality changes (d <= 4.5, one thin
 // width). Root motion splits by measured latent distance, which tracks
 // circle-of-fifths remoteness: ±1-2 fifths ~5.3-7.4, ±3-4 ~8-9.5,
 // ±5-6 (tritone side) ~10-11.
+// Width alone was doing nearly all the work and the four tiers still read as
+// one texture, so each tier now also carries its own HUE, running cool -> hot
+// with the size of the harmonic leap. `tint` is blended over the scheme's own
+// tube colour rather than replacing it, so the user's palette still governs
+// the look.
+//
+// emissiveMul stays modest on the hot tiers on purpose: the bloom pass has a
+// 0.3 threshold, and pushing a wide tube well past it clips every channel and
+// turns the line WHITE - which throws away the hue that was just added. Width
+// carries the magnitude; emissive only has to keep the line legible.
 const TENSION_TIERS = [
-    { maxD: 4.5,      widthMul: 0.3,  opacityMul: 0.45, emissiveMul: 0.15 },
-    { maxD: 7.6,      widthMul: 1.0,  opacityMul: 1.0,  emissiveMul: 1.0 },
-    { maxD: 9.5,      widthMul: 1.8,  opacityMul: 1.2,  emissiveMul: 2.8 },
-    { maxD: Infinity, widthMul: 2.8,  opacityMul: 1.4,  emissiveMul: 5.0 }
+    { maxD: 4.5,      widthMul: 0.45, opacityMul: 0.40, emissiveMul: 0.15, tint: 0x5f7fbe, tintMix: 0.75 },
+    { maxD: 7.6,      widthMul: 1.1,  opacityMul: 1.0,  emissiveMul: 0.8,  tint: 0x7fd4e8, tintMix: 0.35 },
+    { maxD: 9.5,      widthMul: 2.4,  opacityMul: 1.25, emissiveMul: 1.5,  tint: 0xf0a04b, tintMix: 0.70 },
+    { maxD: Infinity, widthMul: 4.0,  opacityMul: 1.5,  emissiveMul: 2.1,  tint: 0xff5d4d, tintMix: 0.85 }
 ];
 function tensionTier(d) {
     return TENSION_TIERS.find(t => d <= t.maxD);
@@ -379,10 +454,14 @@ const RENDER_CFG = {
     bloom: { strength: 0.85, radius: 0.55, threshold: 0.3 },
     exposure: 1.1,
     maxPixelRatio: 1.5,        // cap DPR: full-res bloom on HiDPI can overload the GPU
+    // The sky sits OUTSIDE the boundary (whose far wall reaches ~85 from the
+    // scene origin), so it still reads as backdrop rather than as debris
+    // floating inside the arena. Sizes grew with the radii to keep the stars
+    // the same apparent size.
     starLayers: [
-        { count: 1600, size: 0.09, rMin: 34, rMax: 90, opacity: 0.85, twinkleSpeed: 0.9 },
-        { count: 700,  size: 0.18, rMin: 30, rMax: 75, opacity: 0.65, twinkleSpeed: 1.6 },
-        { count: 220,  size: 0.34, rMin: 26, rMax: 60, opacity: 0.5,  twinkleSpeed: 2.4 }
+        { count: 1600, size: 0.20, rMin: 100, rMax: 260, opacity: 0.85, twinkleSpeed: 0.9 },
+        { count: 700,  size: 0.40, rMin: 95,  rMax: 220, opacity: 0.65, twinkleSpeed: 1.6 },
+        { count: 220,  size: 0.75, rMin: 92,  rMax: 175, opacity: 0.5,  twinkleSpeed: 2.4 }
     ],
     nebulaCount: 6,
     nebulaColors: [0x3a2a7a, 0x1a3a7a, 0x0a4a5a, 0x4a1a4a, 0x24245e],

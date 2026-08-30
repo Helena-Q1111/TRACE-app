@@ -4,11 +4,14 @@ function initScene() {
     const container = document.getElementById('canvas');
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x030308);
+    // Linear distance fog. Only the contents of the latent space take it; the
+    // sky opts out in cosmos.js (see FOG_NEAR / FOG_FAR in config.js).
+    scene.fog = new THREE.Fog(0x030308, FOG_NEAR, FOG_FAR);
 
     // Before any progression loads, look at the tonic (I) reference beacon
     tonicDisplayPos = new THREE.Vector3(...displayCoords(TONIC_I_COORDS));
     followTarget = tonicDisplayPos.clone();
-    camSpherical = new THREE.Spherical().setFromVector3(new THREE.Vector3(0, 0, 34));
+    camSpherical = new THREE.Spherical().setFromVector3(new THREE.Vector3(0, 0, CAMERA_START_RADIUS));
     lightTarget = tonicDisplayPos.clone();
 
     camera = new THREE.PerspectiveCamera(
@@ -17,7 +20,7 @@ function initScene() {
         0.1,
         1000
     );
-    camera.position.copy(tonicDisplayPos).add(new THREE.Vector3(0, 0, 34));
+    camera.position.copy(tonicDisplayPos).add(new THREE.Vector3(0, 0, CAMERA_START_RADIUS));
 
     // preserveDrawingBuffer: video export reads the canvas via captureStream;
     // without it the buffer is cleared after composite and recordings go black
@@ -110,7 +113,8 @@ function setupCameraControls() {
         e.preventDefault();
         const zoomSpeed = 0.1;
         const direction = e.deltaY > 0 ? 1 : -1;
-        camSpherical.radius = Math.max(0.5, Math.min(150, camSpherical.radius * (1 + direction * zoomSpeed)));
+        camSpherical.radius = Math.max(CAMERA_MIN_RADIUS,
+            Math.min(cameraMaxRadius, camSpherical.radius * (1 + direction * zoomSpeed)));
     }, { passive: false });
 }
 

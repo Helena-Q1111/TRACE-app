@@ -61,8 +61,15 @@ function analyzeMidiToSegments(notes, bpb) {
     const G = ANALYSIS_CFG.gridPerBeat;
     const totalUnits = Math.max(1, Math.ceil((Math.max(...notes.map(n => n.endBeat)) - 1e-6) * G));
 
-    // --- Per-unit weighted chroma + bass tracking (unit = 1/G beat) ---
+    // --- Per-unit weighted chroma + register tracking (unit = 1/G beat) ---
+    // unitLowPitch keeps the ACTUAL MIDI pitch each class sounds at, which the
+    // 12-bin chroma throws away. A 2nd and a 9th are the same pitch class; the
+    // only thing that separates them is whether the tone sits inside the octave
+    // above the root or above it. Without this the recogniser cannot tell a
+    // real sus2 from an add9 voiced with the 9 on top, and calls both sus2.
     const unitChroma = Array.from({ length: totalUnits }, () => new Float32Array(12));
+    const unitLowPitch = Array.from({ length: totalUnits },
+        () => new Float32Array(12).fill(Infinity));
     const unitBassPitch = new Array(totalUnits).fill(Infinity);
     notes.forEach((n) => {
         const u0 = Math.max(0, Math.floor(n.startBeat * G + 1e-6));
@@ -73,7 +80,9 @@ function analyzeMidiToSegments(notes, bpb) {
             const beatPos = (u / G) % bpb;
             const mw = beatPos === 0 ? ANALYSIS_CFG.metricStrong
                 : (bpb >= 4 && beatPos === Math.floor(bpb / 2)) ? ANALYSIS_CFG.metricMid : 1.0;
-            unitChroma[u][n.pitch % 12] += ov * mw;
+            const pc = n.pitch % 12;
+            unitChroma[u][pc] += ov * mw;
+            if (n.pitch < unitLowPitch[u][pc]) unitLowPitch[u][pc] = n.pitch;
             if (n.pitch < unitBassPitch[u]) unitBassPitch[u] = n.pitch;
         }
     });
@@ -88,14 +97,18 @@ function analyzeMidiToSegments(notes, bpb) {
         const w = new Float32Array(12);
         const wPlain = new Float32Array(12);
         const bassTime = new Float32Array(12);   // time each pc spends as the bass
+        const lowPitch = new Float32Array(12).fill(Infinity);
+        let segBassPitch = Infinity;
         for (let u = s; u < e; u++) {
             const bassPcOfUnit = unitBassPitch[u] !== Infinity ? unitBassPitch[u] % 12 : -1;
             for (let pc = 0; pc < 12; pc++) {
                 const v = unitChroma[u][pc];
                 wPlain[pc] += v;
                 w[pc] += pc === bassPcOfUnit ? v * ANALYSIS_CFG.bassBoost : v;
+                if (unitLowPitch[u][pc] < lowPitch[pc]) lowPitch[pc] = unitLowPitch[u][pc];
             }
             if (bassPcOfUnit >= 0) bassTime[bassPcOfUnit]++;
+            if (unitBassPitch[u] < segBassPitch) segBassPitch = unitBassPitch[u];
         }
         const total = w.reduce((a, x) => a + x, 0);
         if (total < 1e-6) return { empty: true, score: 0 };
@@ -113,16 +126,47 @@ function analyzeMidiToSegments(notes, bpb) {
         for (let pc = 0; pc < 12; pc++) wNorm += w[pc] * w[pc];
         wNorm = Math.sqrt(wNorm) || 1e-9;
 
-        let best = null;
-        for (const tpl of SCORING_TEMPLATES) {
-            if (w[tpl.root] < 1e-6) continue;   // the root must sound
-            let dot = 0;
-            for (let pc = 0; pc < 12; pc++) dot += w[pc] * tpl.w[pc];
-            let sim = dot / (wNorm * tpl.norm);
-            if (tpl.root === bassPc) sim += ANALYSIS_CFG.rootBassBonus;
-            if (!best || sim > best.sim) best = { sim, root: tpl.root, quality: tpl.quality };
-        }
+        const pickCore = (allowSus) => {
+            let top = null;
+            for (const tpl of SCORING_TEMPLATES) {
+                if (w[tpl.root] < 1e-6) continue;   // the root must sound
+                if (!allowSus && SUSPENDED_INTERVAL[tpl.quality] !== undefined) continue;
+                let dot = 0;
+                for (let pc = 0; pc < 12; pc++) dot += w[pc] * tpl.w[pc];
+                let sim = dot / (wNorm * tpl.norm);
+                if (tpl.root === bassPc) sim += ANALYSIS_CFG.rootBassBonus;
+                if (!top || sim > top.sim) top = { sim, root: tpl.root, quality: tpl.quality };
+            }
+            return top;
+        };
+
+        let best = pickCore(true);
         if (!best) return { empty: true, score: 0 };
+
+        // ---- Voicing check: is that "suspension" actually an upper structure? ----
+        // A sus chord puts the 2nd or 4th where the 3rd would be - close to the
+        // root, inside the octave. If the same pitch class only ever sounds an
+        // octave or more above the root it is a 9th or an 11th sitting on top of
+        // an ordinary triad, and the chord is add9 / 11, not sus. Pitch-class
+        // matching alone cannot see the difference, which is why sus was being
+        // over-reported.
+        let forcedTensionPc = -1;
+        const susIv = SUSPENDED_INTERVAL[best.quality];
+        if (susIv !== undefined) {
+            const susPc = (best.root + susIv) % 12;
+            const ref = Number.isFinite(lowPitch[best.root]) ? lowPitch[best.root] : segBassPitch;
+            if (Number.isFinite(ref) && Number.isFinite(lowPitch[susPc])
+                && lowPitch[susPc] - ref >= 12) {
+                const alt = pickCore(false);
+                if (alt) {
+                    best = alt;
+                    // Keep the tone: it is the whole reason the chord is
+                    // interesting, and the embedding key must not lose it even
+                    // if it lands under the tension layer's weight threshold.
+                    forcedTensionPc = susPc;
+                }
+            }
+        }
 
         // ---- Stage 2: which tensions are genuinely sounding ----
         // Reference = the mean weight of this chord's own sounding tones, so a
@@ -139,7 +183,9 @@ function analyzeMidiToSegments(notes, bpb) {
         for (const t of TENSION_DEFS) {
             const pc = (best.root + t.iv) % 12;
             if (coreSet.has(pc)) continue;
-            if (wPlain[pc] >= ANALYSIS_CFG.tensionKeepRatio * ref) tensions.push(t.iv);
+            if (pc === forcedTensionPc || wPlain[pc] >= ANALYSIS_CFG.tensionKeepRatio * ref) {
+                tensions.push(t.iv);
+            }
         }
 
         // Inversion: the segment's bass differs from the root - only flagged

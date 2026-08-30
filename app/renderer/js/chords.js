@@ -6,14 +6,26 @@
 let pathGroup = null;       // accumulated revealed path segments
 let activeSegmentTween = null;
 let activeSegmentMeta = null;   // {tube, p1} of the currently growing segment
-let cometHead = null;
+let cometHead = null;       // bright meteor head
+let cometTail = null;       // the streak trailing behind it
+
+// The transition reads as a meteor: a bright head with a tapering streak behind
+// it, flying from the previous chord to the new one. What it LEAVES is
+// unchanged - the tube grows to exactly the head's position, so the meteor
+// appears to draw the permanent line and then hands it over.
+// The streak rides on top of the line it is drawing, so it can only read as a
+// meteor if it is clearly FATTER and LONGER than that line: the tube is
+// 0.0033 world units thick, the grains are ~25x that, giving a glowing sheath
+// around a hairline. Grain size must also exceed the spacing (tail length /
+// points) or the trail breaks up into dots.
+const METEOR_TAIL_POINTS = 64;
+const METEOR_TAIL_FRACTION = 0.3;    // of the segment length
+const METEOR_TAIL_MAX = 11 * SCENE_SCALE;
+const METEOR_TAIL_FALLOFF = 1.15;    // higher = shorter-looking streak
 let revealedPoints = [];    // Vector3s of revealed chords (drives trail stardust)
 let trailFlow = null;       // stardust flowing along the revealed path
 let trailCurve = null;
 let activeChordLabels = []; // roman-numeral sprites above progression chords
-let originMarker = null;    // tonic reference beacon at the I chord position
-let originGlow = null;      // additive glow sprite behind the beacon
-let originStars = null;     // small stars orbiting the beacon
 
 // ---- Text label sprites ----
 // THREE.Sprite always faces the camera and scales with distance, so labels
@@ -39,11 +51,12 @@ function makeLabelTexture(text, dim) {
     return { texture: new THREE.CanvasTexture(canvas), aspect: canvas.width / canvas.height };
 }
 
-const LABEL_HEIGHT = 0.7;
+const LABEL_HEIGHT = 0.7 * SCENE_SCALE;
 function makeLabelSprite(text, dim) {
     const { texture, aspect } = makeLabelTexture(text, dim);
     const material = new THREE.SpriteMaterial({
-        map: texture, transparent: true, depthWrite: false, depthTest: false
+        map: texture, transparent: true, depthWrite: false, depthTest: false,
+        fog: false   // labels are UI: they read at any depth or not at all
     });
     const sprite = new THREE.Sprite(material);
     sprite.scale.set(LABEL_HEIGHT * aspect, LABEL_HEIGHT, 1);
@@ -66,84 +79,12 @@ function refreshLabelTexture(sprite) {
 // reference at the origin plus the progression itself. Everything is read
 // relative to the I chord.
 function initChordSpace() {
-    addOriginMarker();
+    initLandmarks().then(applyVisualTheme);
     applyVisualTheme();
 }
 
-// Tonic (I) reference beacon at the C major triad embedding position.
-// Larger and brighter than any progression sphere. Pure white on the dark
-// theme, near-black on light. (MeshBasicMaterial: unlit, so it always reads
-// at full brightness and the bloom pass gives it a halo on the dark bg.)
-// A soft glow sprite plus a slowly orbiting ring of small stars make the
-// beacon read as the gravitational center of the scene.
-function addOriginMarker() {
-    if (originMarker) return;
-    const pos = displayCoords(TONIC_I_COORDS);
-
-    const geometry = new THREE.SphereGeometry(0.22, 24, 24);
-    const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    originMarker = new THREE.Mesh(geometry, material);
-    originMarker.position.set(pos[0], pos[1], pos[2]);
-    scene.add(originMarker);
-
-    // Glow halo (child of the marker so it tracks position automatically)
-    originGlow = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: getGlowTexture(),
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.85,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
-    }));
-    originGlow.scale.set(1.7, 1.7, 1);
-    originMarker.add(originGlow);
-
-    // Small stars in a shell around the beacon (rotated in updateOriginMarker)
-    const starCount = 56;
-    const positions = new Float32Array(starCount * 3);
-    for (let i = 0; i < starCount; i++) {
-        const [x, y, z] = randomInShell(0.4, 1.0);
-        positions[i * 3] = x;
-        positions[i * 3 + 1] = y;
-        positions[i * 3 + 2] = z;
-    }
-    const starGeo = new THREE.BufferGeometry();
-    starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    originStars = new THREE.Points(starGeo, new THREE.PointsMaterial({
-        color: 0xdde4ff,
-        size: 0.055,
-        map: getGlowTexture(),
-        transparent: true,
-        opacity: 0.8,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        sizeAttenuation: true
-    }));
-    originStars.position.set(pos[0], pos[1], pos[2]);
-    scene.add(originStars);
-
-    styleOriginMarker();
-}
-
-function styleOriginMarker() {
-    if (!originMarker) return;
-    const light = isLightBg();
-    originMarker.material.color.setHex(light ? 0x0a0a12 : 0xffffff);
-    if (originGlow) originGlow.visible = !light;   // additive glow invisible on white
-    if (originStars) {
-        originStars.material.color.setHex(light ? 0x44445a : 0xdde4ff);
-        originStars.material.blending = light ? THREE.NormalBlending : THREE.AdditiveBlending;
-        originStars.material.opacity = light ? 0.55 : 0.8;
-        originStars.material.needsUpdate = true;
-    }
-}
-
-// Per-frame: slow orbital drift of the beacon's star ring
-function updateOriginMarker(t) {
-    if (!originStars) return;
-    originStars.rotation.y = t * 0.12;
-    originStars.rotation.x = Math.sin(t * 0.07) * 0.35;
-}
+// The tonic beacon, the other diatonic landmarks, the boundary shell and the
+// heads-up anchors all live in landmarks.js now.
 
 // Load the full embedding table (24576 entries: any (root, pcs) -> 3D coords)
 async function loadEmbeddingTable() {
@@ -279,7 +220,7 @@ function buildProgressionObjects() {
     progression.forEach((chord, idx) => {
         const color = getThemedChordColor(chord);
         const pos = displayCoords(chord.coords);
-        const geometry = new THREE.SphereGeometry(0.08, 32, 32);
+        const geometry = new THREE.SphereGeometry(0.08 * SCENE_SCALE, 32, 32);
         const material = new THREE.MeshStandardMaterial({
             color: color,
             emissive: color,
@@ -299,15 +240,15 @@ function buildProgressionObjects() {
 
         // Off-key chords get a larger, denser halo (extra brightness comes
         // from the emissive boost in the animation loop)
-        const cloudRadius = chord.offKey ? 0.34 : 0.26;
-        const cloudSize = chord.offKey ? 0.048 : 0.038;
+        const cloudRadius = (chord.offKey ? 0.34 : 0.26) * SCENE_SCALE;
+        const cloudSize = (chord.offKey ? 0.048 : 0.038) * SCENE_SCALE;
         const cloud = createChordCloud(pos, color.getHex(), cloudRadius, RENDER_CFG.cloudPerChord, cloudSize);
         cloud.visible = false;
         scene.add(cloud);
         activeChordClouds.push(cloud);
 
         const tag = makeLabelSprite(chord.label, false);
-        tag.position.set(pos[0], pos[1] + 0.55, pos[2]);
+        tag.position.set(pos[0], pos[1] + 0.55 * SCENE_SCALE, pos[2]);
         tag.visible = false;
         scene.add(tag);
         activeChordLabels.push(tag);
@@ -348,13 +289,17 @@ function applyLineWidth(factor) {
 // so switch to normal blending with darkened colors and no emissive wash.
 function isLightBg() { return bgThemeKey === 'light'; }
 
+const _tierTint = new THREE.Color();
+
 function styleTubeMaterial(material, rawD) {
     const scheme = getCometScheme();
     const tier = tensionTier(rawD ?? 4);
-    material.color.setHex(scheme.tube);
-    material.emissive.setHex(scheme.tubeEmissive);
+    // Blend the tier's hue over the scheme's tube colour: the palette still
+    // sets the overall look, the tier says how far the harmony jumped.
+    material.color.setHex(scheme.tube).lerp(_tierTint.setHex(tier.tint), tier.tintMix);
+    material.emissive.setHex(scheme.tubeEmissive).lerp(_tierTint, tier.tintMix * 0.8);
     if (isLightBg()) {
-        material.color.multiplyScalar(0.35);
+        material.color.multiplyScalar(0.45);
         material.emissiveIntensity = 0.0;
         material.opacity = Math.min(1, 0.9 * tier.opacityMul);
     } else {
@@ -415,8 +360,9 @@ function applyVisualTheme() {
     if (pathGroup) pathGroup.children.forEach((tube) => styleTubeMaterial(tube.material, tube.userData.rawD));
     if (trailFlow) styleFlowMaterial(trailFlow.material);
     if (cometHead) styleCometMaterial(cometHead.material);
+    if (cometTail) styleCometMaterial(cometTail.material);
     activeChordLabels.forEach(refreshLabelTexture);
-    styleOriginMarker();
+    styleLandmarks();
     const pointsBlending = isLightBg() ? THREE.NormalBlending : THREE.AdditiveBlending;
     activeChordClouds.forEach((cloud) => {
         if (!cloud) return;
@@ -427,10 +373,83 @@ function applyVisualTheme() {
     applyChordColors();
 }
 
+// Head + streak. Two objects because PointsMaterial has one size for the whole
+// buffer: the head needs to be visibly larger than the grains behind it, and
+// the taper itself rides on per-vertex colour (which multiplies the material's
+// scheme colour, so the vertices carry brightness only).
+function buildMeteor(p0) {
+    removeComet();
+
+    const headGeo = new THREE.BufferGeometry();
+    headGeo.setAttribute('position', new THREE.Float32BufferAttribute([p0.x, p0.y, p0.z], 3));
+    const headMat = new THREE.PointsMaterial({
+        size: 0.19 * SCENE_SCALE,
+        map: getGlowTexture(),
+        transparent: true,
+        depthWrite: false,
+        sizeAttenuation: true
+    });
+    styleCometMaterial(headMat);
+    cometHead = new THREE.Points(headGeo, headMat);
+    cometHead.frustumCulled = false;
+    scene.add(cometHead);
+
+    const n = METEOR_TAIL_POINTS;
+    const tailGeo = new THREE.BufferGeometry();
+    tailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    tailGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    const tailMat = new THREE.PointsMaterial({
+        size: 0.26 * SCENE_SCALE,
+        map: getGlowTexture(),
+        transparent: true,
+        depthWrite: false,
+        sizeAttenuation: true,
+        vertexColors: true
+    });
+    styleCometMaterial(tailMat);
+    cometTail = new THREE.Points(tailGeo, tailMat);
+    cometTail.frustumCulled = false;
+    scene.add(cometTail);
+}
+
+function updateMeteor(seg, segLen, f) {
+    if (!cometHead || !cometTail) return;
+
+    const head = seg.getPointAt(f);
+    cometHead.geometry.attributes.position.setXYZ(0, head.x, head.y, head.z);
+    cometHead.geometry.attributes.position.needsUpdate = true;
+
+    // Tail length is a fraction of the flight, capped so a long leap does not
+    // trail a streak halfway across the space.
+    const tailLen = Math.min(segLen * METEOR_TAIL_FRACTION, METEOR_TAIL_MAX);
+    const span = segLen > 1e-6 ? tailLen / segLen : 0;
+    const pos = cometTail.geometry.attributes.position;
+    const col = cometTail.geometry.attributes.color;
+    const n = METEOR_TAIL_POINTS;
+    const launch = Math.min(1, f / 0.08);        // no streak before it sets off
+    for (let i = 0; i < n; i++) {
+        const k = i / (n - 1);
+        const p = seg.getPointAt(Math.max(0, f - span * k));
+        pos.setXYZ(i, p.x, p.y, p.z);
+        const b = Math.pow(1 - k, METEOR_TAIL_FALLOFF) * launch;
+        col.setXYZ(i, b, b, b);
+    }
+    pos.needsUpdate = true;
+    col.needsUpdate = true;
+}
+
 function removeComet() {
     if (cometHead) {
         scene.remove(cometHead);
+        cometHead.geometry.dispose();
+        cometHead.material.dispose();
         cometHead = null;
+    }
+    if (cometTail) {
+        scene.remove(cometTail);
+        cometTail.geometry.dispose();
+        cometTail.material.dispose();
+        cometTail = null;
     }
 }
 
@@ -498,21 +517,10 @@ function revealChord(idx, animatePath) {
     pathGroup.add(tube);
     activeSegmentMeta = { tube, p1 };
 
-    // Comet head travelling with the tip
-    const cometGeo = new THREE.BufferGeometry();
-    cometGeo.setAttribute('position', new THREE.Float32BufferAttribute([p0.x, p0.y, p0.z], 3));
-    const cometMaterial = new THREE.PointsMaterial({
-        size: 0.075,           // softer, less blown-out glow
-        map: getGlowTexture(),
-        transparent: true,
-        depthWrite: false,
-        sizeAttenuation: true
-    });
-    styleCometMaterial(cometMaterial);
-    cometHead = new THREE.Points(cometGeo, cometMaterial);
-    scene.add(cometHead);
+    buildMeteor(p0);
 
     const seg = new THREE.LineCurve3(p0, p1);
+    const segLen = p0.distanceTo(p1);
     const state = { f: 0 };
     // Growth never longer than the segment's own duration (short segments!)
     const segDurMs = (progression[idx].durBeats || beatsPerBar) * beatDurationMs;
@@ -522,9 +530,7 @@ function revealChord(idx, animatePath) {
         .easing(TWEEN.Easing.Quadratic.InOut)
         .onUpdate(() => {
             tube.geometry.setDrawRange(0, Math.floor(totalIndexCount * state.f));
-            const p = seg.getPointAt(state.f);
-            cometHead.geometry.attributes.position.setXYZ(0, p.x, p.y, p.z);
-            cometHead.geometry.attributes.position.needsUpdate = true;
+            updateMeteor(seg, segLen, state.f);
         })
         .onComplete(() => {
             tube.geometry.setDrawRange(0, totalIndexCount);
@@ -563,7 +569,7 @@ function rebuildTrailFlow() {
     const flowGeometry = new THREE.BufferGeometry();
     flowGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(flowCount * 3), 3));
     const flowMaterial = new THREE.PointsMaterial({
-        size: 0.04,
+        size: 0.04 * SCENE_SCALE,
         map: getGlowTexture(),
         transparent: true,
         depthWrite: false,
@@ -611,11 +617,12 @@ function updateTrailFlow(t) {
     for (let i = 0; i < n; i++) {
         const u = (i / n + t * 0.03) % 1;
         trailCurve.getPointAt(u, v);
+        const j = 0.012 * SCENE_SCALE;
         attr.setXYZ(
             i,
-            v.x + Math.sin(t * 1.3 + i) * 0.012,
-            v.y + Math.cos(t * 1.1 + i * 2) * 0.012,
-            v.z + Math.sin(t * 0.9 + i * 3) * 0.012
+            v.x + Math.sin(t * 1.3 + i) * j,
+            v.y + Math.cos(t * 1.1 + i * 2) * j,
+            v.z + Math.sin(t * 0.9 + i * 3) * j
         );
     }
     attr.needsUpdate = true;

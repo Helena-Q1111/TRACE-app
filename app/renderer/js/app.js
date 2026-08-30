@@ -113,7 +113,7 @@ function animate() {
     updateCosmos(t);
     updateChordClouds(t);
     updateTrailFlow(t);
-    updateOriginMarker(t);
+    updateLandmarks(t);
     updateRadar();
     updateAeViz();
 
@@ -130,7 +130,7 @@ initScene();
 initCosmos();
 initAudio();
 bindControls();
-initChordSpace();       // tonic reference beacon (no preset constellation)
+initChordSpace();       // diatonic landmarks + boundary shell + heads-up anchors
 initRadar();            // circle-of-fifths tension radar (top-right)
 initAeViz();            // autoencoder panel (bottom-right)
 loadEmbeddingTable();   // full (root, pcs) -> coords table

@@ -52,7 +52,8 @@ function initCosmos() {
             opacity: cfg.opacity,
             depthWrite: false,
             blending: THREE.AdditiveBlending,
-            sizeAttenuation: true
+            sizeAttenuation: true,
+            fog: false          // the sky is backdrop, not depth
         });
 
         const stars = new THREE.Points(geometry, material);
@@ -78,12 +79,13 @@ function initCosmos() {
             opacity: 0.07 + Math.random() * 0.07,
             depthWrite: false,
             blending: THREE.AdditiveBlending,
-            rotation: Math.random() * Math.PI * 2
+            rotation: Math.random() * Math.PI * 2,
+            fog: false          // sky, not depth
         });
         const sprite = new THREE.Sprite(material);
-        const [x, y, z] = randomInShell(38, 72);
+        const [x, y, z] = randomInShell(110, 210);
         sprite.position.set(x, y, z);
-        const s = 26 + Math.random() * 34;
+        const s = 76 + Math.random() * 100;
         sprite.scale.set(s, s, 1);
         sprite.userData = {
             rotSpeed: (Math.random() - 0.5) * 0.02,
@@ -142,6 +144,7 @@ function applyBgTheme(key) {
     const theme = getBgTheme();
 
     scene.background = new THREE.Color(theme.bg);
+    if (scene.fog) scene.fog.color.setHex(theme.bg);   // fog must match the sky
 
     cosmos.starLayers.forEach((stars) => {
         const u = stars.userData;

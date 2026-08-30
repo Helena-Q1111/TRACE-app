@@ -27,6 +27,15 @@
                     <label class="control-label">导入 MIDI (.mid)</label>
                     <input type="file" id="midiInput" accept=".mid,.midi">
                 </div>
+                <div class="control-group">
+                    <label class="control-label">音色 Timbre</label>
+                    <div class="theme-row" id="timbreButtons">
+                        <button class="theme-btn active" data-timbre="piano" title="Salamander piano samples">钢琴</button>
+                        <button class="theme-btn" data-timbre="sine" title="Pure sine wave">正弦</button>
+                        <button class="theme-btn" data-timbre="epiano" title="FM electric piano (Rhodes-like)">电钢</button>
+                        <button class="theme-btn" data-timbre="pad" title="Detuned saw pad, lowpassed">铺底</button>
+                    </div>
+                </div>
                 <!-- BPM hidden: timing is read from MIDI -->
                 <div class="control-group" style="display: none;">
                     <label class="control-label">BPM</label>
@@ -105,6 +114,12 @@
                     </label>
                     <input type="range" id="fadeSlider" min="4" max="50" value="16">
 
+                    <label class="control-label">空间参照 Spatial anchors</label>
+                    <div class="theme-row" id="anchorButtons">
+                        <button class="theme-btn active" data-anchor="on">显示</button>
+                        <button class="theme-btn" data-anchor="off">隐藏</button>
+                    </div>
+
                     <label class="control-label">自编码器面板 Autoencoder panel</label>
                     <div class="theme-row" id="aePanelButtons">
                         <button class="theme-btn active" data-ae="on">显示</button>
@@ -131,7 +146,10 @@
 
     <button class="icon-btn expand-btn" id="expandBtn" title="展开边栏" hidden>&#9654;</button>
 
-    <div id="canvas"></div>
+    <div id="canvas">
+        <!-- Heads-up anchors: landmark labels, off-screen chevrons, boundary ticks -->
+        <canvas id="anchorCanvas" class="anchor-hud"></canvas>
+    </div>
 
     <div class="circle-fifths">
         <canvas id="circleCanvas" width="200" height="200"></canvas>
@@ -161,6 +179,7 @@
     <script src="js/particles.js"></script>
     <script src="js/analysis.js"></script>
     <script src="js/chords.js"></script>
+    <script src="js/landmarks.js"></script>
     <script src="js/playback.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/radar.js"></script>

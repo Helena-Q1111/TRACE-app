@@ -1,9 +1,13 @@
-// ========== AUDIO (polyphonic piano sampler) + MIDI PARSING ==========
+// ========== AUDIO (selectable timbre) + MIDI PARSING ==========
 // The old Tone.Synth was MONOPHONIC: chord notes stole its single voice
 // (attack-only clicks), and releases were only fired inside a 50ms window,
-// so missed frames left voices droning forever. Now: Tone.Sampler piano
-// (local Salamander samples) + span-based triggerAttackRelease - every note
-// carries its own duration, nothing can get stuck.
+// so missed frames left voices droning forever. Now every timbre is
+// polyphonic and each note carries its own duration, so nothing can stick.
+//
+// Piano is a Tone.Sampler over the local Salamander samples; the rest are
+// plain Tone.js synths. A voice is built on first use and then kept alive,
+// so switching back is instant - the piano in particular costs 13 IPC
+// reads + decodes.
 
 let midiSpansSec = [];      // [{startSec, endSec, pitch, velocity}] sorted by start
 let midiPlayPtr = 0;        // next span to trigger
@@ -13,37 +17,105 @@ let samplerReady = false;
 const PIANO_SAMPLES = ['C1', 'Fs1', 'C2', 'Fs2', 'C3', 'Fs3', 'C4', 'Fs4', 'C5', 'Fs5', 'C6', 'Fs6', 'C7'];
 const sampleNoteName = (n) => n.replace('s', '#');   // Fs1 -> F#1
 
+async function buildPiano() {
+    if (window.traceAPI && window.traceAPI.readBinary) {
+        // Electron: file:// fetch is blocked, load samples via IPC and decode
+        const urls = {};
+        for (const name of PIANO_SAMPLES) {
+            const raw = await window.traceAPI.readBinary(`vendor/piano/${name}.mp3`);
+            const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+            const decoded = await Tone.getContext().rawContext.decodeAudioData(ab);
+            urls[sampleNoteName(name)] = new Tone.ToneAudioBuffer(decoded);
+        }
+        return new Tone.Sampler({ urls, release: 1 }).toDestination();
+    }
+    // Browser dev server: plain URLs
+    const sampler = new Tone.Sampler({
+        urls: Object.fromEntries(PIANO_SAMPLES.map(n => [sampleNoteName(n), `${n}.mp3`])),
+        baseUrl: 'vendor/piano/',
+        release: 1
+    }).toDestination();
+    await Tone.loaded();
+    return sampler;
+}
+
+// `volume` (dB) is hand-levelled against the piano: raw oscillators are far
+// hotter than the samples, and a voiced chord stacks four of them at once.
+const TIMBRE_BUILDERS = {
+    piano: buildPiano,
+
+    // Pure tone - no harmonics at all, the sound of the chroma vector itself.
+    sine: () => new Tone.PolySynth(Tone.Synth, {
+        volume: -17,
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.012, decay: 0.25, sustain: 0.45, release: 1.1 }
+    }).toDestination(),
+
+    // Rhodes-ish: FM with a fast-decaying modulator gives the bell attack.
+    epiano: () => new Tone.PolySynth(Tone.FMSynth, {
+        volume: -6,
+        harmonicity: 3,
+        modulationIndex: 9,
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.004, decay: 1.4, sustain: 0.08, release: 1.0 },
+        modulation: { type: 'sine' },
+        modulationEnvelope: { attack: 0.004, decay: 0.35, sustain: 0, release: 0.4 }
+    }).toDestination(),
+
+    // Slow detuned saw pad, lowpassed - chords bloom instead of striking,
+    // which suits watching a long tension arc more than a percussive voice.
+    pad: () => {
+        const tone = new Tone.Filter({ type: 'lowpass', frequency: 2000, rolloff: -12 });
+        const poly = new Tone.PolySynth(Tone.Synth, {
+            volume: -13,
+            oscillator: { type: 'fatsawtooth', count: 3, spread: 22 },
+            envelope: { attack: 0.45, decay: 0.7, sustain: 0.7, release: 1.9 }
+        });
+        poly.chain(tone, Tone.getDestination());
+        poly._traceChain = tone;      // keep the filter referenced with its synth
+        return poly;
+    }
+};
+
+const voiceCache = {};              // timbre id -> built Tone instrument
+let currentTimbre = 'piano';
+
+// Built only if the piano samples fail to load - see initAudio().
+function buildFallbackVoice() {
+    return new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'triangle' },
+        envelope: { attack: 0.01, decay: 0.3, sustain: 0.4, release: 0.8 }
+    }).toDestination();
+}
+
+async function getVoice(id) {
+    if (!voiceCache[id]) voiceCache[id] = await TIMBRE_BUILDERS[id]();
+    return voiceCache[id];
+}
+
 async function initAudio() {
     try {
-        if (window.traceAPI && window.traceAPI.readBinary) {
-            // Electron: file:// fetch is blocked, load samples via IPC and decode
-            const urls = {};
-            for (const name of PIANO_SAMPLES) {
-                const raw = await window.traceAPI.readBinary(`vendor/piano/${name}.mp3`);
-                const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
-                const decoded = await Tone.getContext().rawContext.decodeAudioData(ab);
-                urls[sampleNoteName(name)] = new Tone.ToneAudioBuffer(decoded);
-            }
-            synth = new Tone.Sampler({ urls, release: 1 }).toDestination();
-        } else {
-            // Browser dev server: plain URLs
-            synth = new Tone.Sampler({
-                urls: Object.fromEntries(PIANO_SAMPLES.map(n => [sampleNoteName(n), `${n}.mp3`])),
-                baseUrl: 'vendor/piano/',
-                release: 1
-            }).toDestination();
-            await Tone.loaded();
-        }
-        samplerReady = true;
+        voiceCache.piano = await buildPiano();
         console.log('Piano sampler ready (13 Salamander samples)');
     } catch (e) {
         console.warn('Piano samples unavailable, falling back to polyphonic synth:', e);
-        synth = new Tone.PolySynth(Tone.Synth, {
-            oscillator: { type: 'triangle' },
-            envelope: { attack: 0.01, decay: 0.3, sustain: 0.4, release: 0.8 }
-        }).toDestination();
-        samplerReady = true;
+        voiceCache.piano = buildFallbackVoice();
     }
+    synth = voiceCache.piano;
+    currentTimbre = 'piano';
+    samplerReady = true;
+}
+
+// Switching mid-playback: release the outgoing voice so its tails do not
+// hang around under the new one. Notes already past are not re-triggered -
+// the change is audible from the next note on.
+async function setTimbre(id) {
+    if (!TIMBRE_BUILDERS[id] || id === currentTimbre) return;
+    const next = await getVoice(id);
+    if (synth && synth.releaseAll) synth.releaseAll();
+    synth = next;
+    currentTimbre = id;
+    samplerReady = true;
 }
 
 // ---- Transport helpers (wired to the Play / Pause / Restart buttons) ----

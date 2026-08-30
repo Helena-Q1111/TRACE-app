@@ -61,6 +61,16 @@ body.theme-light { background: #f2f2f5; }
     display: block;
 }
 
+/* Heads-up anchor layer: sits over the WebGL canvas, never takes the mouse
+   (the scene owns dragging everywhere it covers). */
+.anchor-hud {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    display: block;
+}
+
 /* Autoencoder panel (bottom-right overlay). Unlike the radar this one takes
    pointer events: its view tabs and window controls are drawn into the canvas.
    The scene keeps the mouse everywhere outside the panel rectangle. */
@@ -234,6 +244,7 @@ input[type="range"] {
 }
 
 .theme-btn:hover { background: var(--btn-hover); }
+.theme-btn:disabled { opacity: 0.5; cursor: default; }
 .theme-btn.active {
     border-color: var(--accent);
     color: var(--accent);

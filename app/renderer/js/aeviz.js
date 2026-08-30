@@ -153,13 +153,16 @@ function aeSyncColors() {
     const key = isLightBg() ? 'light' : 'dark';
     if (key === aeColorKey) return;
     aeColorKey = key;
+    // The panel sits ON the starfield rather than in a chrome box: barely-there
+    // ground, no border. Text and marks carry the readability instead, so the
+    // ink/dim steps are pushed a little brighter than the chrome version was.
     aeColors = key === 'light'
-        ? { ink: '#22222e', dim: '#6c6c82', faint: '#9a9ab0', accent: '#4a63c4',
-            latent: '#12798c', tps: '#a8620d', neg: '#c04a63', ok: '#2c8a58',
-            line: '#d6d6e2', ground: 'rgba(248,248,251,0.88)', fabric: 0.07 }
-        : { ink: '#e4e4ef', dim: '#8b8ba6', faint: '#5a5a72', accent: '#7d96e8',
-            latent: '#5fd8e8', tps: '#f0a04b', neg: '#e07a8d', ok: '#5ec98f',
-            line: '#23233c', ground: 'rgba(6,6,15,0.72)', fabric: 0.05 };
+        ? { ink: '#1b1b26', dim: '#5c5c72', faint: '#8e8ea6', accent: '#4a63c4',
+            latent: '#0f6c7e', tps: '#96580b', neg: '#b8425c', ok: '#247a4d',
+            line: '#c9c9d8', ground: 'rgba(248,248,251,0.30)', fabric: 0.09 }
+        : { ink: '#ececf5', dim: '#9a9ab4', faint: '#6a6a84', accent: '#8ba3ec',
+            latent: '#6fdff0', tps: '#f5ab5e', neg: '#e88a9b', ok: '#6ed49b',
+            line: '#2b2b46', ground: 'rgba(6,6,15,0.26)', fabric: 0.07 };
     aeFabric = null;
     aeDirty = true;
 }
@@ -293,11 +296,8 @@ function aeHeader(title, right) {
 // ----------------------------------------------------------------- pill view
 function aeDrawPill(chord) {
     aeCtx.fillStyle = aeColors.ground;
-    aeCtx.strokeStyle = aeRgba(aeColors.line, 1);
-    aeCtx.lineWidth = 1;
-    aeRoundRect(aeCtx, 0.5, 0.5, AE_PILL_W - 1, AE_PILL_H - 1, 3);
+    aeRoundRect(aeCtx, 0.5, 0.5, AE_PILL_W - 1, AE_PILL_H - 1, 6);
     aeCtx.fill();
-    aeCtx.stroke();
     aeText('15→64→32→3', 9, 17, { size: 8, weight: 600, color: aeColors.accent });
     if (chord) {
         const z = chord.coords;
@@ -667,12 +667,10 @@ function updateAeViz() {
         return;
     }
 
+    // No border: the panel is meant to sit in the starfield, not on top of it
     aeCtx.fillStyle = aeColors.ground;
-    aeCtx.strokeStyle = aeRgba(aeColors.line, 1);
-    aeCtx.lineWidth = 1;
-    aeRoundRect(aeCtx, 0.5, 0.5, AE_W - 1, AE_H - 1, 3);
+    aeRoundRect(aeCtx, 0.5, 0.5, AE_W - 1, AE_H - 1, 6);
     aeCtx.fill();
-    aeCtx.stroke();
 
     if (!chord) {
         aeHeader('AUTOENCODER', '15→64→32→3');
