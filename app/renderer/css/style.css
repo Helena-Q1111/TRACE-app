@@ -297,59 +297,203 @@ input[type="range"] {
 
 .add-mod-btn:hover { color: var(--accent); border-color: var(--accent); }
 
-/* Chord list */
-.chord-list {
-    flex: 1;
-    overflow-y: auto;
-    min-height: 80px;
-    font-family: "Courier New", monospace;
-    position: relative;   /* offsetTop of items relative to the list (follow-scroll) */
-}
-
-.chord-item {
-    padding: 6px 8px;
-    margin: 3px 0;
-    border-left: 3px solid transparent;
-    cursor: pointer;
+/* ===== MIDI import: sidebar button + project chips ===== */
+.upload-btn {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    background: transparent;
+    color: var(--accent);
     font-size: 12px;
-    border-radius: 4px;
-    transition: all 0.15s;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.upload-btn:hover { background: var(--btn-hover); }
+.project-chips { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.project-chips[hidden] { display: none; }
+.project-chip {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px;
+    border-radius: 5px;
+    border: 1px solid var(--btn-border);
+    font-size: 11px;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.project-chip:hover { color: var(--text); background: var(--btn-hover); }
+.project-chip.active { color: var(--text); border-color: var(--accent); cursor: default; }
+.project-chip.active::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+.project-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.project-close { border: none; background: none; color: var(--text-dim); cursor: pointer; font-size: 13px; padding: 0 2px; }
+.project-close:hover { color: var(--text); }
+
+/* ===== Start prompt (centre of the scene until a MIDI is open) ===== */
+.start-prompt {
+    position: absolute; inset: 0;
+    z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none;
+}
+.start-prompt[hidden] { display: none; }
+.start-card {
+    pointer-events: auto;
+    width: min(360px, calc(100% - 32px));
+    padding: 28px 24px 24px;
+    border-radius: 14px;
+    border: 1.5px dashed var(--btn-border);
+    background: rgba(8, 8, 18, 0.72);
+    text-align: center;
+    transition: border-color 0.15s, background 0.15s;
+}
+body.theme-light .start-card { background: rgba(248, 248, 251, 0.85); }
+.start-prompt.dragging .start-card { border-color: var(--accent); background: rgba(40, 50, 100, 0.55); }
+.start-icon { font-size: 30px; color: var(--accent); margin-bottom: 6px; }
+.start-title { font-size: 16px; color: var(--text); margin-bottom: 6px; }
+.start-sub { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; }
+.start-btn {
+    padding: 9px 22px;
+    border-radius: 7px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+}
+.start-btn:hover { filter: brightness(1.1); }
+.start-recent-wrap { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--panel-border); }
+.start-recent-wrap[hidden] { display: none; }
+.start-recent-wrap .start-sub { margin-bottom: 8px; }
+.start-recent { display: flex; flex-direction: column; gap: 6px; }
+.start-recent-btn {
+    padding: 7px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--btn-border);
+    background: var(--btn-bg);
     color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.start-recent-btn:hover { border-color: var(--accent); }
+
+/* ===== Experimental view switcher (bottom-left of the scene: the one corner
+   the move panel, radar and autoencoder panel leave free at any width) ===== */
+.view-bar {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    z-index: 10;
+    flex-wrap: wrap;
+    max-width: calc(100% - 24px);
     display: flex;
     align-items: center;
     gap: 4px;
+    padding: 4px;
+    border-radius: 8px;
+    background: rgba(6, 6, 15, 0.38);
+    font-size: 11px;
 }
-
-.chord-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-/* Live d/t metrics box (beside the chord list) */
-.metrics-box {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 8px;
-}
-
-.metric {
-    flex: 1;
-    background: var(--btn-bg);
-    border: 1px solid var(--btn-border);
-    border-radius: 6px;
-    padding: 6px 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-}
-
-.metric-label {
-    font-size: 10px;
+body.theme-light .view-bar { background: rgba(248, 248, 251, 0.62); }
+.view-bar button {
+    padding: 4px 9px;
+    border-radius: 5px;
+    border: 1px solid transparent;
+    background: transparent;
     color: var(--text-dim);
+    font-size: 11px;
+    cursor: pointer;
 }
+.view-bar button:hover { color: var(--text); }
+.view-bar button.active { color: var(--accent); border-color: var(--accent); }
+.view-bar button[hidden], .view-morph[hidden] { display: none; }
+.view-morph { display: flex; align-items: center; gap: 5px; color: var(--text-dim); padding: 0 4px; }
+.view-morph input { width: 90px; }
 
-.metric-value {
-    font-family: "Courier New", monospace;
-    font-size: 13px;
-    color: var(--accent);
+/* ===== Move panel (top-left of the scene) =====
+   Same ground as the autoencoder panel: a low-opacity wash, no border, so it
+   sits in the scene rather than on top of it. Only the from-I timeline takes
+   the mouse (click to jump); the rest lets drags through to the scene. */
+.move-panel {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 10;
+    width: 268px;
+    padding: 10px 12px 10px;
+    border-radius: 8px;
+    background: rgba(6, 6, 15, 0.38);
+    color: var(--text);
+    font: 500 11px "IBM Plex Mono", Consolas, "Courier New", monospace;
+    pointer-events: none;
+    --t-i: #b69cf0;      /* term colours: categorical labels only, not tension */
+    --t-j: #e8b45c;
+    --t-k: #62c9c0;
 }
+body.theme-light .move-panel {
+    background: rgba(248, 248, 251, 0.62);
+    --t-i: #7a5cc8;
+    --t-j: #b27a1c;
+    --t-k: #1f8f86;
+}
+.move-panel[hidden] { display: none; }
+
+.mv-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.mv-title { font-weight: 700; letter-spacing: 0.12em; font-size: 10px; }
+.mv-where { color: var(--text-dim); font-size: 10px; }
+
+.mv-chords { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; min-height: 22px; }
+.mv-chord { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.mv-chord b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mv-from { opacity: 0.6; font-size: 12px; }
+.mv-to b { font-size: 16px; font-weight: 800; }
+.mv-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.mv-to .mv-dot { width: 10px; height: 10px; }
+.mv-arrow { color: var(--text-dim); font-size: 14px; }
+
+/* delta = i + j + k, each term with what it counts */
+.mv-eq { display: flex; align-items: flex-start; gap: 5px; }
+.mv-term { display: grid; grid-template-columns: auto auto; column-gap: 3px; align-items: baseline; }
+.mv-term em { font-style: italic; color: var(--text-dim); }
+.mv-term b { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mv-term small { grid-column: 1 / 3; font-size: 9px; color: var(--text-dim); white-space: nowrap; }
+.mv-d b { font-size: 16px; }
+.mv-op { color: var(--text-dim); padding-top: 2px; }
+.t-i b { color: var(--t-i); }
+.t-j b { color: var(--t-j); }
+.t-k b { color: var(--t-k); }
+
+.mv-stack {
+    display: flex; height: 5px; margin: 6px 0 3px;
+    border-radius: 3px; overflow: hidden;
+    background: rgba(140, 150, 200, 0.14);
+}
+body.theme-light .mv-stack { background: rgba(40, 40, 70, 0.10); }
+.mv-stack span { height: 100%; transition: width 0.45s ease; }
+.mv-stack .t-i { background: var(--t-i); }
+.mv-stack .t-j { background: var(--t-j); }
+.mv-stack .t-k { background: var(--t-k); }
+.mv-model { font-size: 10px; color: var(--text-dim); }
+.mv-model b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.mv-sub { margin-top: 8px; font-size: 10px; color: var(--text-dim); display: flex; justify-content: space-between; }
+.mv-sub span { color: var(--text); font-variant-numeric: tabular-nums; }
+.mv-canvas { display: block; width: 244px; margin-top: 3px; }
+#mvVoices { height: 52px; }
+.mv-arc { height: 42px; pointer-events: auto; cursor: pointer; }
+
+/* recent moves: newest on top, older ones fainter, leaving ones fade out */
+.mv-history { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+.mv-hist {
+    display: flex; align-items: center; gap: 5px; font-size: 10px;
+    transition: opacity 0.45s ease, transform 0.45s ease;
+}
+.mv-hist.entering { opacity: 0 !important; transform: translateY(-5px); }
+.mv-hist.leaving { opacity: 0 !important; }
+.mv-hist .mv-dot { width: 6px; height: 6px; }
+.mv-hist .nm { max-width: 74px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mv-hist .ar { color: var(--text-dim); }
+.mv-hist .dl { margin-left: auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
 /* Collapsible sections */
 .section.collapsible {
@@ -375,22 +519,6 @@ input[type="range"] {
 }
 
 .section.collapsible.folded .caret { transform: rotate(-90deg); }
-
-.chord-item:hover { background: var(--item-hover); }
-
-.chord-item.active {
-    border-left-color: var(--accent);
-    background: var(--item-hover);
-}
-
-.dot {
-    display: inline-block;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    margin-right: 7px;
-    vertical-align: middle;
-}
 
 /* Info */
 .info-panel { font-size: 11px; }

@@ -77,25 +77,34 @@ const CHORD_PALETTES = {
 // that claims a tone which is not sounding is penalised automatically by its
 // own norm - no complexity-bias constant to tune. The 5th is the one routinely
 // omitted chord tone, so it carries less weight than the defining tones.
+//
+// This table is the ONLY place a quality is defined. Every per-quality lookup
+// below (CORE_TONES, SUSPENDED_INTERVAL, QUALITY_GROUP, QUALITY_SUFFIX,
+// QUALITY_MARK, RNA_SUFFIX) is derived from it, so adding a quality is one row.
+//   group   4-colour scheme bucket         suffix  absolute label ("Cm7")
+//   rna     roman-numeral suffix ("ii7" - minor-ness is the lowercase numeral)
+//   mark    degree decoration, ° or +
 const FIFTH_WEIGHT = 0.7;
+const F5 = FIFTH_WEIGHT;
 const CORE_QUALITIES = [
     // triads
-    { quality: 'major',     tones: [[0, 1], [4, 1], [7, FIFTH_WEIGHT]] },
-    { quality: 'minor',     tones: [[0, 1], [3, 1], [7, FIFTH_WEIGHT]] },
-    { quality: 'dim',       tones: [[0, 1], [3, 1], [6, 1]] },
-    { quality: 'aug',       tones: [[0, 1], [4, 1], [8, 1]] },
-    { quality: 'sus2',      tones: [[0, 1], [2, 1], [7, FIFTH_WEIGHT]] },
-    { quality: 'sus4',      tones: [[0, 1], [5, 1], [7, FIFTH_WEIGHT]] },
+    { quality: 'major',     tones: [[0, 1], [4, 1], [7, F5]],           group: 'major',    suffix: '',      rna: '',      mark: '' },
+    { quality: 'minor',     tones: [[0, 1], [3, 1], [7, F5]],           group: 'minor',    suffix: 'm',     rna: '',      mark: '' },
+    { quality: 'dim',       tones: [[0, 1], [3, 1], [6, 1]],            group: 'altered',  suffix: 'dim',   rna: '',      mark: '°' },
+    { quality: 'aug',       tones: [[0, 1], [4, 1], [8, 1]],            group: 'altered',  suffix: 'aug',   rna: '',      mark: '+' },
+    { quality: 'sus2',      tones: [[0, 1], [2, 1], [7, F5]],           group: 'major',    suffix: 'sus2',  rna: 'sus2',  mark: '' },
+    { quality: 'sus4',      tones: [[0, 1], [5, 1], [7, F5]],           group: 'major',    suffix: 'sus4',  rna: 'sus4',  mark: '' },
     // sevenths
-    { quality: 'maj7',      tones: [[0, 1], [4, 1], [7, FIFTH_WEIGHT], [11, 1]] },
-    { quality: 'dominant7', tones: [[0, 1], [4, 1], [7, FIFTH_WEIGHT], [10, 1]] },
-    { quality: 'min7',      tones: [[0, 1], [3, 1], [7, FIFTH_WEIGHT], [10, 1]] },
-    { quality: 'minMaj7',   tones: [[0, 1], [3, 1], [7, FIFTH_WEIGHT], [11, 1]] },
-    { quality: 'm7b5',      tones: [[0, 1], [3, 1], [6, 1], [10, 1]] },
-    { quality: 'dim7',      tones: [[0, 1], [3, 1], [6, 1], [9, 1]] },
-    { quality: 'dom7sus4',  tones: [[0, 1], [5, 1], [7, FIFTH_WEIGHT], [10, 1]] },
-    { quality: 'dom7sus2',  tones: [[0, 1], [2, 1], [7, FIFTH_WEIGHT], [10, 1]] }
+    { quality: 'maj7',      tones: [[0, 1], [4, 1], [7, F5], [11, 1]],  group: 'major',    suffix: 'maj7',  rna: 'maj7',  mark: '' },
+    { quality: 'dominant7', tones: [[0, 1], [4, 1], [7, F5], [10, 1]],  group: 'dominant', suffix: '7',     rna: '7',     mark: '' },
+    { quality: 'min7',      tones: [[0, 1], [3, 1], [7, F5], [10, 1]],  group: 'minor',    suffix: 'm7',    rna: '7',     mark: '' },
+    { quality: 'minMaj7',   tones: [[0, 1], [3, 1], [7, F5], [11, 1]],  group: 'minor',    suffix: 'mMaj7', rna: 'maj7',  mark: '' },
+    { quality: 'm7b5',      tones: [[0, 1], [3, 1], [6, 1], [10, 1]],   group: 'altered',  suffix: 'm7♭5',  rna: '7',     mark: '°' },
+    { quality: 'dim7',      tones: [[0, 1], [3, 1], [6, 1], [9, 1]],    group: 'altered',  suffix: 'dim7',  rna: '7',     mark: '°' },
+    { quality: 'dom7sus4',  tones: [[0, 1], [5, 1], [7, F5], [10, 1]],  group: 'dominant', suffix: '7sus4', rna: '7sus4', mark: '' },
+    { quality: 'dom7sus2',  tones: [[0, 1], [2, 1], [7, F5], [10, 1]],  group: 'dominant', suffix: '7sus2', rna: '7sus2', mark: '' }
 ];
+const qualityField = (field) => Object.fromEntries(CORE_QUALITIES.map(q => [q.quality, q[field]]));
 // Deliberately NOT here, after measuring all three on the corpus:
 //   power (0.16% of Hooktheory) - a two-tone template has a small norm, so it
 //     wins whenever the third is merely QUIET rather than absent. It fired on
@@ -113,20 +122,16 @@ const CORE_QUALITIES = [
 // enters the embedding lookup, whether or not every member sounded. Filling in
 // an omitted 5th is deliberate: it keeps one recognized chord on one table
 // entry, so the 3D point does not jump between voicings of the same chord.
-const CORE_TONES = (() => {
-    const m = {};
-    CORE_QUALITIES.forEach((q) => { m[q.quality] = q.tones.map(t => t[0]); });
-    return m;
-})();
+const CORE_TONES = Object.fromEntries(CORE_QUALITIES.map(q => [q.quality, q.tones.map(t => t[0])]));
 
-// The interval that a suspended quality puts where the 3rd would be. Used by
-// the voicing check in analysis.js: if that pitch class only sounds an octave
-// or more above the root, it is a 9th or an 11th on top of an ordinary triad,
-// not a suspension, and the chord should be re-read without the sus templates.
-const SUSPENDED_INTERVAL = {
-    sus2: 2, dom7sus2: 2,
-    sus4: 5, dom7sus4: 5
-};
+// The interval that a suspended quality puts where the 3rd would be: a quality
+// with no 3rd at all, carrying a 2nd or a 4th instead. Used by the voicing
+// check in analysis.js: if that pitch class only sounds an octave or more above
+// the root, it is a 9th or an 11th on top of an ordinary triad, not a
+// suspension, and the chord should be re-read without the sus templates.
+const SUSPENDED_INTERVAL = Object.fromEntries(Object.entries(CORE_TONES)
+    .filter(([, ivs]) => !ivs.includes(3) && !ivs.includes(4))
+    .map(([quality, ivs]) => [quality, ivs.find(iv => iv === 2 || iv === 5)]));
 
 // ---- Tension layer ----
 // Checked against the chosen root AFTER the core quality is fixed; a tension
@@ -143,21 +148,10 @@ const TENSION_DEFS = [
     { iv: 9, sym: '13' }
 ];
 
-// Quality -> 4-color group
-const QUALITY_GROUP = {
-    major: 'major', maj7: 'major', sus2: 'major', sus4: 'major',
-    minor: 'minor', min7: 'minor', minMaj7: 'minor',
-    dominant7: 'dominant', dom7sus4: 'dominant', dom7sus2: 'dominant',
-    dim: 'altered', aug: 'altered', m7b5: 'altered', dim7: 'altered'
-};
-
-// Display suffixes for absolute chord labels
-const QUALITY_SUFFIX = {
-    major: '', minor: 'm', dim: 'dim', aug: 'aug', sus2: 'sus2', sus4: 'sus4',
-    dominant7: '7', maj7: 'maj7', min7: 'm7', minMaj7: 'mMaj7',
-    m7b5: 'm7♭5', dim7: 'dim7',
-    dom7sus4: '7sus4', dom7sus2: '7sus2'
-};
+// Quality -> 4-color group, absolute-label suffix, degree decoration
+const QUALITY_GROUP = qualityField('group');
+const QUALITY_SUFFIX = qualityField('suffix');
+const QUALITY_MARK = qualityField('mark');
 
 // Tension figures, e.g. "(9,13)". Sorted by TENSION_DEFS order so the reading
 // is always ♭9, 9, ♯9, 11, ♯11, ♭13, 13.
@@ -190,11 +184,9 @@ const DEGREE_NAMES = {
 function romanDegree(chord, k) {
     const iv = (((chord.root ?? 0) - k.tonic) % 12 + 12) % 12;
     let name = DEGREE_NAMES[iv];
-    const grp = QUALITY_GROUP[chord.quality] || 'major';
-    if (grp === 'minor') name = name.toLowerCase();
-    if (['dim', 'dim7', 'm7b5'].includes(chord.quality)) name = name.toLowerCase() + '°';
-    if (chord.quality === 'aug') name += '+';
-    return name;
+    const mark = QUALITY_MARK[chord.quality] || '';
+    if (QUALITY_GROUP[chord.quality] === 'minor' || mark === '°') name = name.toLowerCase();
+    return name + mark;
 }
 
 // Full absolute label: root + quality + tension figures + inversion slash,
@@ -210,13 +202,7 @@ function getChordLabel(chord) {
 // Case/°/+ come from romanDegree; minor-ness is implied by lowercase so
 // min7 -> "ii7" (not iim7). m7b5 uses the half-diminished slash ø.
 // Inversions are appended as the chord member in the bass: /3 /5 /7 ...
-const RNA_SUFFIX = {
-    major: '', minor: '', dim: '', aug: '',
-    sus2: 'sus2', sus4: 'sus4',
-    dominant7: '7', maj7: 'maj7', min7: '7', minMaj7: 'maj7',
-    dim7: '7', m7b5: '7',
-    dom7sus4: '7sus4', dom7sus2: '7sus2'
-};
+const RNA_SUFFIX = qualityField('rna');
 const BASS_MEMBER = {
     3: '3', 4: '3', 7: '5', 10: '7', 11: '7',
     2: '9', 5: '11', 9: '13', 6: '♭5', 8: '♯5'
@@ -294,15 +280,28 @@ function getThemedChordColor(chord) {
     return c;
 }
 
+// ---- Colour management ----
+// Palette colours are sRGB - they are what the sidebar dots and the HUD show.
+// Three r128 has no colour management: a material colour is taken as a LINEAR
+// value, and the output stage then sRGB-encodes it, which lifts and washes
+// every colour (a #d5a376 amber line rendered as grey-beige 198,193,187).
+// Everything that paints a palette colour into the scene converts it first.
+function sceneColor(c) {
+    return new THREE.Color(c).convertSRGBToLinear();
+}
+function getSceneChordColor(chord) {
+    return getThemedChordColor(chord).convertSRGBToLinear();
+}
+
 function getChordColorHexStr(chord) {
     return '#' + getThemedChordColor(chord).getHexString();
 }
 
 // ---- Comet / path color schemes ----
 const COMET_SCHEMES = {
-    ice:    { name: '星蓝', comet: 0xbcd0f5, flow: 0x9db4e8, tube: 0x99aadd, tubeEmissive: 0x6677cc, swatch: '#9db4e8' },
-    solar:  { name: '金橙', comet: 0xf5d7a8, flow: 0xe8bc7d, tube: 0xd9b285, tubeEmissive: 0xb98a4a, swatch: '#e8bc7d' },
-    violet: { name: '紫辉', comet: 0xdcc2f0, flow: 0xc39ce8, tube: 0xb391d4, tubeEmissive: 0x8a5cc0, swatch: '#c39ce8' }
+    ice:    { name: '星蓝', comet: 0xbcd0f5, flow: 0x9db4e8, swatch: '#9db4e8' },
+    solar:  { name: '金橙', comet: 0xf5d7a8, flow: 0xe8bc7d, swatch: '#e8bc7d' },
+    violet: { name: '紫辉', comet: 0xdcc2f0, flow: 0xc39ce8, swatch: '#c39ce8' }
 };
 let cometSchemeKey = 'ice';
 function getCometScheme() { return COMET_SCHEMES[cometSchemeKey]; }
@@ -311,7 +310,10 @@ function getCometScheme() { return COMET_SCHEMES[cometSchemeKey]; }
 const BG_THEMES = {
     dark: {
         name: '深空',
-        bg: 0x030308,
+        // The colour as displayed (sRGB); sceneColor() converts it. Kept equal
+        // to what the old pipeline actually showed, so the sky did not change
+        // when the double tone mapping was removed (see scene.js).
+        bg: 0x0c0c21,
         starAdditive: true,
         starPalette: 'bright',     // white / ice-blue / warm tints
         starOpacityScale: 1.0,
@@ -322,7 +324,7 @@ const BG_THEMES = {
     },
     light: {
         name: '纸白',
-        bg: 0xe8e8ee,              // slightly gray so particles read against it
+        bg: 0xe2e2e3,              // slightly gray so particles read against it (displayed sRGB)
         starAdditive: false,       // additive is invisible on white
         starPalette: 'dark',       // dark gray-blue dots
         starOpacityScale: 1.0,
@@ -387,21 +389,15 @@ function inverseDisplayCoords(c) {
 // width). Root motion splits by measured latent distance, which tracks
 // circle-of-fifths remoteness: ±1-2 fifths ~5.3-7.4, ±3-4 ~8-9.5,
 // ±5-6 (tritone side) ~10-11.
-// Width alone was doing nearly all the work and the four tiers still read as
-// one texture, so each tier now also carries its own HUE, running cool -> hot
-// with the size of the harmonic leap. `tint` is blended over the scheme's own
-// tube colour rather than replacing it, so the user's palette still governs
-// the look.
-//
-// emissiveMul stays modest on the hot tiers on purpose: the bloom pass has a
-// 0.3 threshold, and pushing a wide tube well past it clips every channel and
-// turns the line WHITE - which throws away the hue that was just added. Width
-// carries the magnitude; emissive only has to keep the line legible.
+// A tier sets only a line's WIDTH (and how present it is). Colour belongs to
+// the harmony instead: each line runs from its first chord's colour to its
+// second's, so in the function scheme a T -> D move is literally blue fading
+// into red. Lines are flat, unlit and kept out of the bloom layer.
 const TENSION_TIERS = [
-    { maxD: 4.5,      widthMul: 0.45, opacityMul: 0.40, emissiveMul: 0.15, tint: 0x5f7fbe, tintMix: 0.75 },
-    { maxD: 7.6,      widthMul: 1.1,  opacityMul: 1.0,  emissiveMul: 0.8,  tint: 0x7fd4e8, tintMix: 0.35 },
-    { maxD: 9.5,      widthMul: 2.4,  opacityMul: 1.25, emissiveMul: 1.5,  tint: 0xf0a04b, tintMix: 0.70 },
-    { maxD: Infinity, widthMul: 4.0,  opacityMul: 1.5,  emissiveMul: 2.1,  tint: 0xff5d4d, tintMix: 0.85 }
+    { maxD: 4.5,      widthMul: 0.45, opacityMul: 0.40 },
+    { maxD: 7.6,      widthMul: 1.1,  opacityMul: 1.0 },
+    { maxD: 9.5,      widthMul: 2.4,  opacityMul: 1.25 },
+    { maxD: Infinity, widthMul: 4.0,  opacityMul: 1.5 }
 ];
 function tensionTier(d) {
     return TENSION_TIERS.find(t => d <= t.maxD);
@@ -450,6 +446,12 @@ function parseTimeSignature(str) {
 // ---- Rendering settings ----
 // Particle budget kept moderate: buffers are allocated once at these max counts;
 // the density knob only changes drawRange (no realloc, no GC churn).
+// Bloom is SELECTIVE: only objects that opt in with
+// obj.layers.enable(BLOOM_LAYER) feed it (the sky's stars, the chord spheres,
+// the meteor). It used to take the whole frame, so every line, landmark and
+// cage edge bright enough to clear the threshold grew a halo - and a halo
+// whose core has clipped comes out white whatever its hue. See scene.js.
+const BLOOM_LAYER = 1;
 const RENDER_CFG = {
     bloom: { strength: 0.85, radius: 0.55, threshold: 0.3 },
     exposure: 1.1,
@@ -479,6 +481,10 @@ let lightFollower = null;
 
 // ---- State ----
 let embeddingTable = {};    // full (root, bass, pcs) -> coords table
+// Resolves once the table is in (or failed to load). Anything that looks
+// chords up must wait on it: a MIDI imported during the first second or two
+// after launch used to find an empty table and put every chord at the origin.
+let embeddingTableReady = Promise.resolve();
 let analysisSegments = []; // recognizer output (key-independent)
 let midiNoteSpans = [];     // [{startBeat, endBeat, pitch}] for analysis
 let progression = [];

@@ -8,7 +8,8 @@ const cosmos = {
     dust: null
 };
 
-// Two precomputed palettes per star: bright (dark bg) and dark (light bg)
+// Two precomputed palettes per star: bright (dark bg) and dark (light bg).
+// Picked in display (sRGB) terms and stored linear, like every scene colour.
 function makeStarColors(count) {
     const bright = new Float32Array(count * 3);
     const dark = new Float32Array(count * 3);
@@ -18,9 +19,10 @@ function makeStarColors(count) {
         if (roll < 0.65) tint.setHSL(0, 0, 0.9 + Math.random() * 0.1);
         else if (roll < 0.85) tint.setHSL(0.6, 0.5, 0.8);
         else tint.setHSL(0.08, 0.5, 0.8);
+        tint.convertSRGBToLinear();
         bright[i * 3] = tint.r; bright[i * 3 + 1] = tint.g; bright[i * 3 + 2] = tint.b;
         // Dark palette: near-black blue-gray dots for the light theme
-        tint.setHSL(0.62, 0.14, 0.06 + Math.random() * 0.1);
+        tint.setHSL(0.62, 0.14, 0.06 + Math.random() * 0.1).convertSRGBToLinear();
         dark[i * 3] = tint.r; dark[i * 3 + 1] = tint.g; dark[i * 3 + 2] = tint.b;
     }
     return { bright, dark };
@@ -66,6 +68,7 @@ function initCosmos() {
             maxCount: cfg.count,
             palettes: palettes
         };
+        stars.layers.enable(BLOOM_LAYER);   // the sky keeps its bloom
         scene.add(stars);
         cosmos.starLayers.push(stars);
     });
@@ -107,7 +110,7 @@ function initCosmos() {
     const dustGeometry = new THREE.BufferGeometry();
     dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
     const dustMaterial = new THREE.PointsMaterial({
-        color: theme.dustColor,
+        color: sceneColor(theme.dustColor),
         size: 0.02,
         map: getGlowTexture(),
         transparent: true,
@@ -143,8 +146,8 @@ function applyBgTheme(key) {
     bgThemeKey = key;
     const theme = getBgTheme();
 
-    scene.background = new THREE.Color(theme.bg);
-    if (scene.fog) scene.fog.color.setHex(theme.bg);   // fog must match the sky
+    scene.background = sceneColor(theme.bg);
+    if (scene.fog) scene.fog.color.copy(scene.background);   // fog must match the sky
 
     cosmos.starLayers.forEach((stars) => {
         const u = stars.userData;
@@ -159,7 +162,7 @@ function applyBgTheme(key) {
     cosmos.nebulae.forEach((sprite) => { sprite.visible = theme.nebulaVisible; });
 
     if (cosmos.dust) {
-        cosmos.dust.material.color.setHex(theme.dustColor);
+        cosmos.dust.material.color.copy(sceneColor(theme.dustColor));
         cosmos.dust.material.blending = theme.starAdditive ? THREE.AdditiveBlending : THREE.NormalBlending;
         cosmos.dust.material.opacity = theme.dustOpacity;
         cosmos.dust.material.needsUpdate = true;

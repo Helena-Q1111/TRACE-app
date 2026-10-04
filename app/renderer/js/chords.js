@@ -30,10 +30,10 @@ let activeChordLabels = []; // roman-numeral sprites above progression chords
 // ---- Text label sprites ----
 // THREE.Sprite always faces the camera and scales with distance, so labels
 // zoom with the scene but never tilt - UI-like tags pinned above each chord.
-function makeLabelTexture(text, dim) {
+function makeLabelTexture(text, dim, bold) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    const font = '600 44px "Segoe UI", "Microsoft YaHei", sans-serif';
+    const font = `${bold ? 800 : 600} 44px "Segoe UI", "Microsoft YaHei", sans-serif`;
     ctx.font = font;
     canvas.width = Math.max(64, Math.ceil(ctx.measureText(text).width) + 24);
     canvas.height = 64;
@@ -42,20 +42,24 @@ function makeLabelTexture(text, dim) {
     ctx.textBaseline = 'middle';
     const light = isLightBg();
     ctx.strokeStyle = light ? 'rgba(255,255,255,0.85)' : 'rgba(3,3,8,0.85)';
-    ctx.lineWidth = 6;
+    ctx.lineWidth = bold ? 9 : 6;
     ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
     ctx.fillStyle = light
         ? (dim ? 'rgba(15,15,28,0.7)' : 'rgba(5,5,15,1)')
         : (dim ? 'rgba(215,224,255,0.55)' : 'rgba(240,244,255,0.95)');
     ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-    return { texture: new THREE.CanvasTexture(canvas), aspect: canvas.width / canvas.height };
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.encoding = THREE.sRGBEncoding;   // canvas pixels are sRGB
+    return { texture, aspect: canvas.width / canvas.height };
 }
 
 const LABEL_HEIGHT = 0.7 * SCENE_SCALE;
+const LABEL_LIFT = 0.55 * SCENE_SCALE;       // label centre above its sphere
 function makeLabelSprite(text, dim) {
     const { texture, aspect } = makeLabelTexture(text, dim);
     const material = new THREE.SpriteMaterial({
         map: texture, transparent: true, depthWrite: false, depthTest: false,
+        toneMapped: false,
         fog: false   // labels are UI: they read at any depth or not at all
     });
     const sprite = new THREE.Sprite(material);
@@ -63,16 +67,52 @@ function makeLabelSprite(text, dim) {
     sprite.renderOrder = 10;   // readable over spheres/particles
     sprite.userData.labelText = text;
     sprite.userData.labelDim = !!dim;
+    sprite.userData.labelBold = false;
+    sprite.userData.aspect = aspect;
+    sprite.userData.height = LABEL_HEIGHT;   // eased every frame, see updateChordLabels
     return sprite;
 }
 
 // Redraw a label's texture for the current background theme
 function refreshLabelTexture(sprite) {
-    const { texture, aspect } = makeLabelTexture(sprite.userData.labelText, sprite.userData.labelDim);
+    const u = sprite.userData;
+    const { texture, aspect } = makeLabelTexture(u.labelText, u.labelDim, u.labelBold);
     if (sprite.material.map) sprite.material.map.dispose();
     sprite.material.map = texture;
-    sprite.scale.set(LABEL_HEIGHT * aspect, LABEL_HEIGHT, 1);
+    u.aspect = aspect;
+    sprite.scale.set(u.height * aspect, u.height, 1);
     sprite.material.needsUpdate = true;
+}
+
+// The current chord's label is held at a CONSTANT on-screen size - at least
+// LABEL_CURRENT_PX tall, and bold - so it always outranks the landmark names
+// (9-13px HUD text). A 3D sprite otherwise shrinks with distance, and at the
+// default camera the current chord's name came out smaller than the fixed
+// landmarks around it. Once the music moves on, the label eases back to its
+// ordinary world size over about half a second.
+const LABEL_CURRENT_PX = 30;          // sprite height in CSS px (text is ~70% of it)
+const LABEL_EASE = 0.12;              // per-frame approach to the target size
+const _labelCam = new THREE.Vector3();
+function updateChordLabels() {
+    if (!activeChordLabels.length) return;
+    const viewH = renderer.domElement.clientHeight || 1;
+    // world height that projects to 1 CSS px at distance 1
+    const perPx = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / viewH;
+    camera.getWorldPosition(_labelCam);
+    activeChordLabels.forEach((label, idx) => {
+        if (!label.visible) return;
+        const u = label.userData;
+        const current = idx === currentIndex;
+        if (u.labelBold !== current) { u.labelBold = current; refreshLabelTexture(label); }
+        const anchor = activeChordSpheres[idx].position;
+        const target = current
+            ? Math.max(LABEL_HEIGHT * 1.6, LABEL_CURRENT_PX * perPx * anchor.distanceTo(_labelCam))
+            : LABEL_HEIGHT;
+        u.height += (target - u.height) * (current ? 0.35 : LABEL_EASE);
+        label.scale.set(u.height * u.aspect, u.height, 1);
+        // lift with the size, so a big label never sits on its own sphere
+        label.position.set(anchor.x, anchor.y + LABEL_LIFT + (u.height - LABEL_HEIGHT) * 0.5, anchor.z);
+    });
 }
 
 // The background constellation is gone: the scene only shows the tonic
@@ -116,6 +156,35 @@ function transposedChordKey(root, bass, pcs, bar) {
     set.add(r);
     set.add(b);
     return { root: r, bass: b, pcs: [...set].sort((x, y) => x - y) };
+}
+
+// ---- TPS terms, delta = i + j + k (Lerdahl) ----
+// j and k are exactly the model's training target (data/chord_dataset.py):
+//   j  circle-of-fifths ring distance between the two roots (0-6)
+//   k  size of the symmetric difference of the two pitch-class sets
+// both computed on the C-frame keys the embeddings live in.
+// i is the distance between the two chords' KEYS on the circle of fifths
+// (relative majors, as the frame uses). Training windows are transposed into
+// one key, so the model only ever saw i = 0; it turns non-zero here only at a
+// modulation marked in the sidebar.
+function tpsFrameTerms(a, b) {
+    const pa = (7 * a.root) % 12, pb = (7 * b.root) % 12;
+    const d = Math.abs(pa - pb);
+    const j = Math.min(d, 12 - d);
+    const A = new Set(a.pcs), B = new Set(b.pcs);
+    let k = 0;
+    A.forEach(v => { if (!B.has(v)) k++; });
+    B.forEach(v => { if (!A.has(v)) k++; });
+    return { j, k, delta: j + k };
+}
+
+function tpsMove(from, to) {
+    const frame = c => transposedChordKey(c.root, c.bass, c.pcs, c.bar);
+    const { j, k } = tpsFrameTerms(frame(from), frame(to));
+    const tonicOf = (bar) => { const key = keyAtBar(bar); return key.mode === 'minor' ? (key.tonic + 3) % 12 : key.tonic; };
+    const di = Math.abs((7 * tonicOf(from.bar)) % 12 - (7 * tonicOf(to.bar)) % 12);
+    const i = Math.min(di, 12 - di);
+    return { i, j, k, delta: i + j + k };
 }
 
 function embeddingKeyString(k) {
@@ -185,6 +254,7 @@ function rebuildProgressionFromAnalysis() {
     updateUI();
     renderProgression();
     applyChordColors();
+    persistActiveProject();      // projects.js: the key just chosen belongs to this project
 }
 
 // ---- Progressive reveal machinery ----
@@ -212,29 +282,54 @@ function clearProgressionObjects() {
     revealedPoints = [];
 }
 
+// Halo sprite size, in the sphere's own (unscaled) units: ~7 sphere radii
+// across, so it reads as light around the ball rather than a second, larger ball.
+const CHORD_HALO_SCALE = 0.55 * SCENE_SCALE;
+
 // Create all spheres + particle clouds once, hidden until revealed
 function buildProgressionObjects() {
     pathGroup = new THREE.Group();
     scene.add(pathGroup);
 
     progression.forEach((chord, idx) => {
-        const color = getThemedChordColor(chord);
-        const pos = displayCoords(chord.coords);
+        const color = getSceneChordColor(chord);
+        const pos = chordScenePos(idx).toArray();      // view-dependent (views.js)
         const geometry = new THREE.SphereGeometry(0.08 * SCENE_SCALE, 32, 32);
+        // Low metalness: a metal has no diffuse colour, so at 0.7 the body
+        // read as a dark ball with a white highlight and only the emissive
+        // carried the hue.
         const material = new THREE.MeshStandardMaterial({
             color: color,
             emissive: color,
             emissiveIntensity: 0.3,
-            roughness: 0.3,
-            metalness: 0.7,
+            roughness: 0.45,
+            metalness: 0.25,
             transparent: true,   // enables per-chord fade-out
             opacity: 1.0
         });
         const sphere = new THREE.Mesh(geometry, material);
         sphere.position.set(...pos);
+        // The halo is its own sprite in the chord's colour, not bloom. Bloom
+        // keys on brightness, so a halo big enough to see needed an emissive
+        // high enough that the sphere itself tone-mapped to near-white (a
+        // #3d9bff chord rendered 205,217,222) - and then the halo around it was
+        // white too. As a child it follows the sphere's visibility and its
+        // current-chord scale-up; strength is set per frame in app.js.
+        const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: getGlowTexture(),
+            color: color,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,     // the palette colour, as the sidebar shows it
+            opacity: 0
+        }));
+        halo.scale.set(CHORD_HALO_SCALE, CHORD_HALO_SCALE, 1);
+        halo.visible = !isLightBg();       // additive light does nothing on paper
+        sphere.add(halo);
         sphere.castShadow = true;
         sphere.visible = false;
-        sphere.userData = { label: chord.label, idx, isActive: true };
+        sphere.userData = { label: chord.label, idx, isActive: true, halo };
         scene.add(sphere);
         activeChordSpheres.push(sphere);
 
@@ -248,7 +343,7 @@ function buildProgressionObjects() {
         activeChordClouds.push(cloud);
 
         const tag = makeLabelSprite(chord.label, false);
-        tag.position.set(pos[0], pos[1] + 0.55 * SCENE_SCALE, pos[2]);
+        tag.position.set(pos[0], pos[1] + LABEL_LIFT, pos[2]);
         tag.visible = false;
         scene.add(tag);
         activeChordLabels.push(tag);
@@ -259,11 +354,17 @@ function buildProgressionObjects() {
 function applyChordColors() {
     // Progression spheres + clouds
     activeChordSpheres.forEach((sphere, idx) => {
-        const c = getThemedChordColor(progression[idx]);
+        const c = getSceneChordColor(progression[idx]);
         sphere.material.color.copy(c);
         sphere.material.emissive.copy(c);
+        sphere.userData.halo.material.color.copy(c);
+        sphere.userData.halo.visible = !isLightBg();
         if (activeChordClouds[idx]) activeChordClouds[idx].material.color.copy(c);
     });
+    // Lines run between their two chords' colours
+    if (pathGroup) pathGroup.children.forEach(paintTubeGradient);
+    // Landmarks are coloured by the same scheme as the chords
+    styleLandmarks();
     // Sidebar dots
     updateUI();
 }
@@ -282,49 +383,68 @@ function applyLineWidth(factor) {
             new THREE.LineCurve3(p0, p1), 32, BASE_TUBE_RADIUS * lineWidthFactor * tier.widthMul, 8);
         tube.geometry.dispose();
         tube.geometry = g;   // full drawRange by default; the active tween re-clamps
+        paintTubeGradient(tube);
     });
 }
 
 // Theme-aware styling: on the light background additive glow is invisible,
-// so switch to normal blending with darkened colors and no emissive wash.
+// so switch to normal blending with darkened colors.
 function isLightBg() { return bgThemeKey === 'light'; }
 
-const _tierTint = new THREE.Color();
-
+// The hue lives in the vertex colours (paintTubeGradient); the material only
+// sets how present the line is, which the tension tier decides.
 function styleTubeMaterial(material, rawD) {
-    const scheme = getCometScheme();
     const tier = tensionTier(rawD ?? 4);
-    // Blend the tier's hue over the scheme's tube colour: the palette still
-    // sets the overall look, the tier says how far the harmony jumped.
-    material.color.setHex(scheme.tube).lerp(_tierTint.setHex(tier.tint), tier.tintMix);
-    material.emissive.setHex(scheme.tubeEmissive).lerp(_tierTint, tier.tintMix * 0.8);
-    if (isLightBg()) {
-        material.color.multiplyScalar(0.45);
-        material.emissiveIntensity = 0.0;
-        material.opacity = Math.min(1, 0.9 * tier.opacityMul);
-    } else {
-        material.emissiveIntensity = 0.18 * tier.emissiveMul;
-        material.opacity = Math.min(1, 0.5 * tier.opacityMul);
+    material.color.setRGB(1, 1, 1);
+    material.opacity = Math.min(1, (isLightBg() ? 0.9 : 0.5) * tier.opacityMul);
+}
+
+// Colour a tube from its first chord's colour to its second's. Vertices come in
+// rings along the length (TubeGeometry: tubularSegments + 1 rings of
+// radialSegments + 1), so ring i sits at fraction i / tubularSegments.
+const _gradA = new THREE.Color(), _gradB = new THREE.Color();
+function paintTubeGradient(tube) {
+    const to = tube.userData.toIdx;
+    if (!(to >= 1) || !progression[to] || !progression[to - 1]) return;
+    _gradA.copy(getSceneChordColor(progression[to - 1]));
+    _gradB.copy(getSceneChordColor(progression[to]));
+    const g = tube.geometry;
+    const rings = g.parameters.tubularSegments, around = g.parameters.radialSegments + 1;
+    const colors = new Float32Array(g.attributes.position.count * 3);
+    for (let i = 0; i <= rings; i++) {
+        const t = i / rings;
+        const r = _gradA.r + (_gradB.r - _gradA.r) * t;
+        const gg = _gradA.g + (_gradB.g - _gradA.g) * t;
+        const b = _gradA.b + (_gradB.b - _gradA.b) * t;
+        for (let j = 0; j < around; j++) {
+            const v = (i * around + j) * 3;
+            colors[v] = r; colors[v + 1] = gg; colors[v + 2] = b;
+        }
     }
+    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 }
 
 function styleFlowMaterial(material) {
     material.color.setHex(getCometScheme().flow);
+    if (isLightBg()) material.color.multiplyScalar(0.5);
+    material.color.convertSRGBToLinear();
+    material.toneMapped = false;
     if (isLightBg()) {
-        material.color.multiplyScalar(0.5);
         material.blending = THREE.NormalBlending;
         material.opacity = 0.6;
     } else {
         material.blending = THREE.AdditiveBlending;
-        material.opacity = 0.45;
+        material.opacity = 0.22;
     }
     material.needsUpdate = true;
 }
 
 function styleCometMaterial(material) {
     material.color.setHex(getCometScheme().comet);
+    if (isLightBg()) material.color.multiplyScalar(0.55);
+    material.color.convertSRGBToLinear();
+    material.toneMapped = false;
     if (isLightBg()) {
-        material.color.multiplyScalar(0.55);
         material.blending = THREE.NormalBlending;
         material.opacity = 0.8;
     } else {
@@ -336,15 +456,17 @@ function styleCometMaterial(material) {
 
 // rawD = model-space distance between the two chords (pre-remap); it picks
 // the tension tier. Display positions p0/p1 may be remapped.
-function makeSegmentTube(p0, p1, rawD) {
+function makeSegmentTube(p0, p1, rawD, toIdx) {
     const d = rawD ?? p0.distanceTo(p1);
     const tier = tensionTier(d);
     const curve = new THREE.LineCurve3(p0, p1);
     const geometry = new THREE.TubeGeometry(curve, 32, BASE_TUBE_RADIUS * lineWidthFactor * tier.widthMul, 8);
-    const material = new THREE.MeshStandardMaterial({ transparent: true, roughness: 0.5 });
+    // Unlit and outside the bloom layer: a flat stroke, no shading, no glow.
+    const material = new THREE.MeshBasicMaterial({ transparent: true, toneMapped: false, vertexColors: true });
     styleTubeMaterial(material, d);
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.userData = { p0: p0.clone(), p1: p1.clone(), rawD: d };
+    mesh.userData = { p0: p0.clone(), p1: p1.clone(), rawD: d, toIdx };
+    paintTubeGradient(mesh);
     return mesh;
 }
 
@@ -362,7 +484,8 @@ function applyVisualTheme() {
     if (cometHead) styleCometMaterial(cometHead.material);
     if (cometTail) styleCometMaterial(cometTail.material);
     activeChordLabels.forEach(refreshLabelTexture);
-    styleLandmarks();
+    viewRing.forEach(refreshLabelTexture);
+    styleViewGuides();
     const pointsBlending = isLightBg() ? THREE.NormalBlending : THREE.AdditiveBlending;
     activeChordClouds.forEach((cloud) => {
         if (!cloud) return;
@@ -391,6 +514,7 @@ function buildMeteor(p0) {
     });
     styleCometMaterial(headMat);
     cometHead = new THREE.Points(headGeo, headMat);
+    cometHead.layers.enable(BLOOM_LAYER);
     cometHead.frustumCulled = false;
     scene.add(cometHead);
 
@@ -408,6 +532,7 @@ function buildMeteor(p0) {
     });
     styleCometMaterial(tailMat);
     cometTail = new THREE.Points(tailGeo, tailMat);
+    cometTail.layers.enable(BLOOM_LAYER);
     cometTail.frustumCulled = false;
     scene.add(cometTail);
 }
@@ -488,19 +613,18 @@ function revealChord(idx, animatePath) {
     if (activeChordClouds[idx]) activeChordClouds[idx].visible = true;
     if (activeChordLabels[idx]) activeChordLabels[idx].visible = true;
 
-    const p1 = new THREE.Vector3(...displayCoords(progression[idx].coords));
+    const p1 = chordScenePos(idx);
     if (idx === 0) {
         revealedPoints = [p1];
         rebuildTrailFlow();
         return;
     }
-    const p0 = new THREE.Vector3(...displayCoords(progression[idx - 1].coords));
-    // Tier from raw model distance (matches the d metric in the sidebar)
+    const p0 = chordScenePos(idx - 1);
+    // Tier from raw model distance (the move panel's ‖Δz‖)
     const rawD = euclideanDistance(progression[idx - 1].coords, progression[idx].coords);
 
     if (!animatePath) {
-        const tube0 = makeSegmentTube(p0, p1, rawD);
-        tube0.userData.toIdx = idx;
+        const tube0 = makeSegmentTube(p0, p1, rawD, idx);
         pathGroup.add(tube0);
         pushRevealedPoint(p1);
         return;
@@ -510,8 +634,7 @@ function revealChord(idx, animatePath) {
     finalizeActiveSegment();
 
     // Animated growth via index drawRange (tube indices are ordered along its length)
-    const tube = makeSegmentTube(p0, p1, rawD);
-    tube.userData.toIdx = idx;
+    const tube = makeSegmentTube(p0, p1, rawD, idx);
     const totalIndexCount = tube.geometry.index.count;
     tube.geometry.setDrawRange(0, 0);
     pathGroup.add(tube);
@@ -606,6 +729,7 @@ function renderProgression() {
     for (let i = 0; i <= currentIndex; i++) {
         revealChord(i, false);
     }
+    onProgressionRendered();     // views.js: landmarks / guides follow the view
 }
 
 // Per-frame: move stardust along the revealed path

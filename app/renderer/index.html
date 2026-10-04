@@ -24,8 +24,10 @@
                     <button id="restartBtn" title="Restart">&#8634;</button>
                 </div>
                 <div class="control-group">
-                    <label class="control-label">导入 MIDI (.mid)</label>
-                    <input type="file" id="midiInput" accept=".mid,.midi">
+                    <button class="upload-btn" data-pick-midi>&#8682; <span id="uploadLabel">导入 MIDI</span></button>
+                    <input type="file" id="midiInput" accept=".mid,.midi" hidden>
+                    <!-- the two cached projects (js/projects.js) -->
+                    <div class="project-chips" id="projectChips" hidden></div>
                 </div>
                 <div class="control-group">
                     <label class="control-label">音色 Timbre</label>
@@ -54,28 +56,8 @@
                 <button class="add-mod-btn" id="addModBtn">+ 在第?小节转为?调</button>
             </div>
 
-            <!-- Chord list + live metrics -->
-            <div class="section section-grow">
-                <div class="section-title">和弦 Chords</div>
-                <div class="metrics-box">
-                    <div class="metric">
-                        <span class="metric-label">d</span>
-                        <span class="metric-value" id="liveD">&mdash;</span>
-                    </div>
-                    <div class="metric">
-                        <span class="metric-label">t</span>
-                        <span class="metric-value" id="liveT">&mdash;</span>
-                    </div>
-                    <div class="metric">
-                        <span class="metric-label">级数</span>
-                        <span class="metric-value" id="liveDegree">&mdash;</span>
-                    </div>
-                </div>
-                <div class="chord-list" id="chordList"></div>
-            </div>
-
-            <!-- Appearance (collapsible) -->
-            <div class="section collapsible folded" id="appearanceSection">
+            <!-- Appearance (collapsible, open by default: it is what the sidebar is for now) -->
+            <div class="section collapsible" id="appearanceSection">
                 <div class="section-title toggle" data-target="appearanceSection">
                     <span>外观 Appearance</span><span class="caret">&#9662;</span>
                 </div>
@@ -149,6 +131,69 @@
     <div id="canvas">
         <!-- Heads-up anchors: landmark labels, off-screen chevrons, boundary ticks -->
         <canvas id="anchorCanvas" class="anchor-hud"></canvas>
+
+        <!-- Start prompt: shown until a MIDI is open (js/projects.js) -->
+        <div class="start-prompt" id="startPrompt">
+            <div class="start-card">
+                <div class="start-icon">&#9835;</div>
+                <div class="start-title">导入一首 MIDI 开始</div>
+                <div class="start-sub">把 .mid 文件拖到这里，或者</div>
+                <button class="start-btn" data-pick-midi>选择 MIDI 文件</button>
+                <div class="start-recent-wrap" hidden>
+                    <div class="start-sub">最近的工程</div>
+                    <div class="start-recent" id="startRecent"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Experimental view layouts (js/views.js) -->
+        <div class="view-bar" id="viewBar">
+            <button data-view="original" class="active" title="原来的视图：跟随和弦飞行">原始</button>
+            <button data-view="bowl" title="学到的空间：以 I 为中心摆正，不做变形">张力碗</button>
+            <button data-view="well" title="规整化：五度圈均匀分布，离 I 的距离保持真实">引力井</button>
+            <button data-view="tunnel" title="引力井的截面沿时间展开">隧道</button>
+            <label class="view-morph" id="viewMorphWrap" hidden>学到的
+                <input type="range" id="viewMorph" min="0" max="100" value="0">规整</label>
+            <button id="viewTop" hidden title="俯视：引力井从上往下看就是 2D 靶盘">俯视</button>
+        </div>
+
+        <!-- The move just made: which chord to which, what TPS says it costs
+             (delta = i + j + k), how each chord tone travelled, and where the
+             piece stands relative to home. Recent moves stack underneath and
+             fade out. Hidden until a MIDI is loaded. -->
+        <div class="move-panel" id="movePanel" hidden>
+            <div class="mv-head">
+                <span class="mv-title">MOVE</span>
+                <span class="mv-where" id="mvWhere"></span>
+            </div>
+            <div class="mv-chords">
+                <span class="mv-chord mv-from" id="mvFrom"><i class="mv-dot"></i><b></b></span>
+                <span class="mv-arrow">&rarr;</span>
+                <span class="mv-chord mv-to" id="mvTo"><i class="mv-dot"></i><b></b></span>
+            </div>
+
+            <div class="mv-eq" id="mvEq">
+                <span class="mv-term mv-d"><em>&delta;</em><b id="mvDelta"></b></span>
+                <span class="mv-op">=</span>
+                <span class="mv-term t-i"><em>i</em><b id="mvI"></b><small>key</small></span>
+                <span class="mv-op">+</span>
+                <span class="mv-term t-j"><em>j</em><b id="mvJ"></b><small>root 5ths</small></span>
+                <span class="mv-op">+</span>
+                <span class="mv-term t-k"><em>k</em><b id="mvK"></b><small>tones</small></span>
+            </div>
+            <div class="mv-stack" id="mvStack">
+                <span class="t-i"></span><span class="t-j"></span><span class="t-k"></span>
+            </div>
+            <div class="mv-model">&Vert;&Delta;z&Vert; model <b id="mvDz"></b></div>
+
+            <div class="mv-sub">chord tones <span id="mvVoiceNote"></span></div>
+            <canvas class="mv-canvas" id="mvVoices"></canvas>
+
+            <div class="mv-sub">from I <span id="mvHome"></span></div>
+            <canvas class="mv-canvas mv-arc" id="mvArc" title="Click to jump to a chord"></canvas>
+
+            <div class="mv-history" id="mvHistory"></div>
+        </div>
     </div>
 
     <div class="circle-fifths">
@@ -180,8 +225,10 @@
     <script src="js/analysis.js"></script>
     <script src="js/chords.js"></script>
     <script src="js/landmarks.js"></script>
+    <script src="js/views.js"></script>
     <script src="js/playback.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/projects.js"></script>
     <script src="js/radar.js"></script>
     <script src="js/aeviz.js"></script>
     <script src="js/export.js"></script>

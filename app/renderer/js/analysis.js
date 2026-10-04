@@ -1,9 +1,13 @@
 // ========== FRONTEND CHORD ANALYSIS ==========
-// Two-stage recognition over whole-beat quantized weighted chroma, with per-bar
-// DP segmentation (<=4 segments/bar) and strict merging.
+// Whole-beat quantized weighted chroma, cut into chords by a per-bar DP
+// (<=4 segments/bar), then merged only where truly identical.
 //
-//   stage 1  pick (root, core quality) by weighted-template COSINE similarity
-//   stage 2  attach the tensions that are actually sounding
+//   stage 1  pick (root, core quality) by weighted-template COSINE similarity,
+//            then veto a "sus" whose suspended tone is really a 9th/11th
+//   stage 2  attach the tensions that are actually sounding; decide the bass
+//
+// Only stage 1 is needed to SCORE a candidate span, so the DP runs stage 1 on
+// every span it tries and stage 2 only on the spans it keeps.
 //
 // The vocabulary (CORE_QUALITIES / TENSION_DEFS) lives in config.js.
 //
@@ -16,11 +20,25 @@
 // template norm and lowers the score. Measured effect on 95,423 Hooktheory
 // segments - exact pitch-class set 50.8% -> 88.8%, invented tones 49.2% -> 7.1%
 // (scripts/eval_chord_recognition.py).
+//
+// Segmentation and the bass are measured separately, on Hooktheory rendered to
+// MIDI in two textures (scripts/eval_segmentation.py) - the labelling benchmark
+// hands the recognizer true boundaries and a true bass, so it cannot see them.
 
 const ANALYSIS_CFG = {
     gridPerBeat: 1,          // whole-beat boundary resolution
     maxSegmentsPerBar: 4,    // hard cap on chord changes per bar
-    segmentPenalty: 0.45,    // cost per extra segment
+    // Cost of starting a new chord INSIDE a bar (the barline is free: bars are
+    // cut independently), in units of the bar's mean per-beat energy. Priced by
+    // where chords really change - 295,592 changes in Hooktheory 4/4: beat 1
+    // 58.4%, beat 3 17.7% (+5.0% anticipated on 2.5), beat 4 6.1%, beat 2 3.0%.
+    // A single flat price (0.45 everywhere) made the half-bar change as dear as
+    // a weak-beat one, so a bar holding two chords stayed whole and their union
+    // was read as one 7th chord: Mozart K.545 m.2 (G7 | C) came out "Cmaj7".
+    // The weak-beat price is unchanged; it is what keeps an Alberti bar from
+    // being cut into one-beat fragments that each hold half a triad.
+    cutPenaltyMid: 0.05,     // half-bar (4/4 beat 3, 6/8 beat 4)
+    cutPenaltyWeak: 0.45,    // any other beat
     rootBassBonus: 0.05,     // cosine-scale bonus when root == the segment bass
     inversionMinRatio: 0.55, // bass must carry this much weight (vs max) to flag inversion
     // A tension counts when it is at least this strong relative to the MEAN
@@ -54,172 +72,196 @@ const SCORING_TEMPLATES = (() => {
     return out;
 })();
 
+// Metric level of a beat position within the bar: 2 downbeat, 1 half-bar
+// (only in bars of 4+ beats), 0 anything else. Weights the chroma, the bass
+// vote and the price of a cut.
+function metricLevel(beatPos, bpb) {
+    if (beatPos === 0) return 2;
+    return (bpb >= 4 && beatPos === Math.floor(bpb / 2)) ? 1 : 0;
+}
+
 // notes: [{startBeat, endBeat, pitch}], returns segments:
-// [{startBeat, endBeat, durBeats, bar, beatInBar, root, quality, pcs}]
+// [{startBeat, endBeat, durBeats, bar, beatInBar, root, bass, quality,
+//   tensions, pcs, soundingPcs}]
 function analyzeMidiToSegments(notes, bpb) {
     if (!notes || notes.length === 0) return [];
-    const G = ANALYSIS_CFG.gridPerBeat;
+    const CFG = ANALYSIS_CFG;
+    const G = CFG.gridPerBeat;
     const totalUnits = Math.max(1, Math.ceil((Math.max(...notes.map(n => n.endBeat)) - 1e-6) * G));
+    const metricWeight = [1.0, CFG.metricMid, CFG.metricStrong];
+    const unitMetric = Array.from({ length: totalUnits },
+        (_, u) => metricWeight[metricLevel((u / G) % bpb, bpb)]);
 
-    // --- Per-unit weighted chroma + register tracking (unit = 1/G beat) ---
+    // --- Per-unit weighted chroma + register (unit = 1/G beat) ---
     // unitLowPitch keeps the ACTUAL MIDI pitch each class sounds at, which the
     // 12-bin chroma throws away. A 2nd and a 9th are the same pitch class; the
     // only thing that separates them is whether the tone sits inside the octave
-    // above the root or above it. Without this the recogniser cannot tell a
+    // above the root or above it. Without this the recognizer cannot tell a
     // real sus2 from an add9 voiced with the 9 on top, and calls both sus2.
     const unitChroma = Array.from({ length: totalUnits }, () => new Float32Array(12));
     const unitLowPitch = Array.from({ length: totalUnits },
         () => new Float32Array(12).fill(Infinity));
-    const unitBassPitch = new Array(totalUnits).fill(Infinity);
     notes.forEach((n) => {
         const u0 = Math.max(0, Math.floor(n.startBeat * G + 1e-6));
         const u1 = Math.min(totalUnits, Math.ceil(n.endBeat * G - 1e-6));
         for (let u = u0; u < u1; u++) {
             const ov = Math.min(n.endBeat, (u + 1) / G) - Math.max(n.startBeat, u / G);
             if (ov <= 0.03) continue;   // ignore hairline overlaps
-            const beatPos = (u / G) % bpb;
-            const mw = beatPos === 0 ? ANALYSIS_CFG.metricStrong
-                : (bpb >= 4 && beatPos === Math.floor(bpb / 2)) ? ANALYSIS_CFG.metricMid : 1.0;
             const pc = n.pitch % 12;
-            unitChroma[u][pc] += ov * mw;
+            unitChroma[u][pc] += ov * unitMetric[u];
             if (n.pitch < unitLowPitch[u][pc]) unitLowPitch[u][pc] = n.pitch;
-            if (n.pitch < unitBassPitch[u]) unitBassPitch[u] = n.pitch;
         }
     });
+    // The lowest sounding pitch class of each unit (-1 = silent)
+    const unitBassPc = unitLowPitch.map((low) => {
+        let pc = -1;
+        for (let p = 0; p < 12; p++) if (low[p] < (pc < 0 ? Infinity : low[pc])) pc = p;
+        return pc;
+    });
+
+    // --- Measure a unit range [s, e): what sounded, and where the bass is ---
     // The bass boost is NOT folded into unitChroma: it exists to help stage 1
     // find the root, and letting it leak into every later measurement is what
     // made the bass pitch class dominate the segment (see tensionKeepRatio).
-    // Two chroma vectors are accumulated per segment instead:
+    // Two chroma vectors are accumulated instead:
     //   w      - bass-boosted, used only to pick (root, quality)
     //   wPlain - what actually sounded, used to judge tone presence
-    // --- Score one unit range [s, e) against all (root, template) pairs ---
-    function segmentInfo(s, e) {
+    function measureSpan(s, e) {
         const w = new Float32Array(12);
         const wPlain = new Float32Array(12);
-        const bassTime = new Float32Array(12);   // time each pc spends as the bass
         const lowPitch = new Float32Array(12).fill(Infinity);
-        let segBassPitch = Infinity;
+        const bassVote = new Float32Array(12);
         for (let u = s; u < e; u++) {
-            const bassPcOfUnit = unitBassPitch[u] !== Infinity ? unitBassPitch[u] % 12 : -1;
+            const bassPcOfUnit = unitBassPc[u];
             for (let pc = 0; pc < 12; pc++) {
                 const v = unitChroma[u][pc];
                 wPlain[pc] += v;
-                w[pc] += pc === bassPcOfUnit ? v * ANALYSIS_CFG.bassBoost : v;
+                w[pc] += pc === bassPcOfUnit ? v * CFG.bassBoost : v;
                 if (unitLowPitch[u][pc] < lowPitch[pc]) lowPitch[pc] = unitLowPitch[u][pc];
             }
-            if (bassPcOfUnit >= 0) bassTime[bassPcOfUnit]++;
-            if (unitBassPitch[u] < segBassPitch) segBassPitch = unitBassPitch[u];
+            // Metric-weighted: in a broken-chord figure (Alberti C-G-E-G) the
+            // lowest note of each BEAT alternates root, 3rd, root, 3rd. Counted
+            // one vote per beat that is a tie, and the old tie-break (lowest
+            // pitch-CLASS number) handed C chords their root but G chords their
+            // 3rd - a false inversion on 13% of root-position Alberti frames.
+            // The beats that carry the harmony are the strong ones.
+            if (bassPcOfUnit >= 0) bassVote[bassPcOfUnit] += unitMetric[u];
         }
-        const total = w.reduce((a, x) => a + x, 0);
-        if (total < 1e-6) return { empty: true, score: 0 };
-        // Dominant bass: the pc that is the lowest voice for the MOST time
-        // (a fleeting low passing note no longer decides the segment's bass)
-        let bassPc = -1, bassBest = 0;
+        let total = 0;
+        for (let pc = 0; pc < 12; pc++) total += w[pc];
+        // Dominant bass: the pc that is the lowest voice on the most (metrically
+        // weighted) beats - a fleeting low passing note does not decide it.
+        // Exact ties go to the lower sounding pitch.
+        let bassPc = -1;
         for (let pc = 0; pc < 12; pc++) {
-            if (bassTime[pc] > bassBest) { bassBest = bassTime[pc]; bassPc = pc; }
+            if (bassVote[pc] <= 0) continue;
+            if (bassPc < 0 || bassVote[pc] > bassVote[bassPc] + 1e-9
+                || (Math.abs(bassVote[pc] - bassVote[bassPc]) <= 1e-9 && lowPitch[pc] < lowPitch[bassPc])) {
+                bassPc = pc;
+            }
         }
-        // ---- Stage 1: (root, core quality) by weighted-template cosine ----
-        // Cosine is scale-free, so the DP score is re-scaled by the segment's
-        // energy: a long segment explaining a lot of weight must outscore two
-        // short ones, exactly as under the old P - N - M score.
+        return { w, wPlain, lowPitch, total, bassPc };
+    }
+
+    // --- Stage 1: (root, core quality) by weighted-template cosine ---
+    function pickChord(m) {
         let wNorm = 0;
-        for (let pc = 0; pc < 12; pc++) wNorm += w[pc] * w[pc];
+        for (let pc = 0; pc < 12; pc++) wNorm += m.w[pc] * m.w[pc];
         wNorm = Math.sqrt(wNorm) || 1e-9;
 
-        const pickCore = (allowSus) => {
+        // Any root considered must actually sound, which is what guarantees
+        // lowPitch[root] and a non-empty tension reference further down.
+        const bestTemplate = (allowSus) => {
             let top = null;
             for (const tpl of SCORING_TEMPLATES) {
-                if (w[tpl.root] < 1e-6) continue;   // the root must sound
+                if (m.w[tpl.root] < 1e-6) continue;
                 if (!allowSus && SUSPENDED_INTERVAL[tpl.quality] !== undefined) continue;
                 let dot = 0;
-                for (let pc = 0; pc < 12; pc++) dot += w[pc] * tpl.w[pc];
+                for (let pc = 0; pc < 12; pc++) dot += m.w[pc] * tpl.w[pc];
                 let sim = dot / (wNorm * tpl.norm);
-                if (tpl.root === bassPc) sim += ANALYSIS_CFG.rootBassBonus;
+                if (tpl.root === m.bassPc) sim += CFG.rootBassBonus;
                 if (!top || sim > top.sim) top = { sim, root: tpl.root, quality: tpl.quality };
             }
             return top;
         };
 
-        let best = pickCore(true);
-        if (!best) return { empty: true, score: 0 };
+        const best = bestTemplate(true);
+        best.forcedTensionPc = -1;
 
-        // ---- Voicing check: is that "suspension" actually an upper structure? ----
+        // Voicing check: is that "suspension" actually an upper structure?
         // A sus chord puts the 2nd or 4th where the 3rd would be - close to the
         // root, inside the octave. If the same pitch class only ever sounds an
         // octave or more above the root it is a 9th or an 11th sitting on top of
         // an ordinary triad, and the chord is add9 / 11, not sus. Pitch-class
         // matching alone cannot see the difference, which is why sus was being
         // over-reported.
-        let forcedTensionPc = -1;
         const susIv = SUSPENDED_INTERVAL[best.quality];
         if (susIv !== undefined) {
             const susPc = (best.root + susIv) % 12;
-            const ref = Number.isFinite(lowPitch[best.root]) ? lowPitch[best.root] : segBassPitch;
-            if (Number.isFinite(ref) && Number.isFinite(lowPitch[susPc])
-                && lowPitch[susPc] - ref >= 12) {
-                const alt = pickCore(false);
-                if (alt) {
-                    best = alt;
-                    // Keep the tone: it is the whole reason the chord is
-                    // interesting, and the embedding key must not lose it even
-                    // if it lands under the tension layer's weight threshold.
-                    forcedTensionPc = susPc;
-                }
+            if (Number.isFinite(m.lowPitch[susPc])
+                && m.lowPitch[susPc] - m.lowPitch[best.root] >= 12) {
+                // The root still sounds, so a non-sus template on it exists.
+                const alt = bestTemplate(false);
+                // Keep the tone: it is the whole reason the chord is
+                // interesting, and the embedding key must not lose it even if
+                // it lands under the tension layer's weight threshold.
+                alt.forcedTensionPc = susPc;
+                return alt;
             }
         }
+        return best;
+    }
 
-        // ---- Stage 2: which tensions are genuinely sounding ----
+    // --- Stage 2: tensions, bass, and the lookup key for a KEPT span ---
+    function describeChord(m, chord) {
         // Reference = the mean weight of this chord's own sounding tones, so a
         // tension is kept when it is comparable to the rest of the chord rather
-        // than to whatever the loudest pitch class happens to be.
-        const maxPlain = Math.max(...wPlain);
-        const coreIvs = CORE_TONES[best.quality];
-        const corePcs = coreIvs.map(iv => (best.root + iv) % 12);
-        const coreSet = new Set(corePcs);
+        // than to whatever the loudest pitch class happens to be. The root
+        // always sounds, so the mean is never empty.
+        const corePcs = CORE_TONES[chord.quality].map(iv => (chord.root + iv) % 12);
         let refSum = 0, refN = 0;
-        corePcs.forEach((pc) => { if (wPlain[pc] > 1e-6) { refSum += wPlain[pc]; refN++; } });
-        const ref = refN > 0 ? refSum / refN : maxPlain;
+        corePcs.forEach((pc) => { if (m.wPlain[pc] > 1e-6) { refSum += m.wPlain[pc]; refN++; } });
+        const ref = refSum / refN;
+
+        const tonePcs = new Set(corePcs);
         const tensions = [];
         for (const t of TENSION_DEFS) {
-            const pc = (best.root + t.iv) % 12;
-            if (coreSet.has(pc)) continue;
-            if (pc === forcedTensionPc || wPlain[pc] >= ANALYSIS_CFG.tensionKeepRatio * ref) {
+            const pc = (chord.root + t.iv) % 12;
+            if (tonePcs.has(pc)) continue;
+            if (pc === chord.forcedTensionPc || m.wPlain[pc] >= CFG.tensionKeepRatio * ref) {
                 tensions.push(t.iv);
             }
         }
+        tensions.forEach(iv => tonePcs.add((chord.root + iv) % 12));
 
         // Inversion: the segment's bass differs from the root - only flagged
         // when the bass is a chord tone AND carries substantial weight. Judged
         // on wPlain: against the boosted chroma the bass would always pass.
-        const tonePcs = new Set(corePcs);
-        tensions.forEach(iv => tonePcs.add((best.root + iv) % 12));
-        let bass = best.root;
-        if (bassPc >= 0 && bassPc !== best.root && tonePcs.has(bassPc)
-            && wPlain[bassPc] >= ANALYSIS_CFG.inversionMinRatio * maxPlain) {
-            bass = bassPc;
-        }
-        tonePcs.add(bass);
+        const maxPlain = Math.max(...m.wPlain);
+        const bass = (m.bassPc !== chord.root && tonePcs.has(m.bassPc)
+            && m.wPlain[m.bassPc] >= CFG.inversionMinRatio * maxPlain) ? m.bassPc : chord.root;
 
         // `pcs` is the embedding lookup key: core tones (5th included even when
         // omitted, so one recognized chord always maps to one table entry) plus
-        // confirmed tensions plus the bass. `soundingPcs` is what actually rang,
-        // used for off-key detection where inventing a 5th would be misleading.
+        // confirmed tensions (the bass is always one of these). `soundingPcs`
+        // is what actually rang, used for off-key detection where inventing a
+        // 5th would be misleading.
         const soundingPcs = [];
-        for (let pc = 0; pc < 12; pc++) if (wPlain[pc] > 1e-6) soundingPcs.push(pc);
+        for (let pc = 0; pc < 12; pc++) if (m.wPlain[pc] > 1e-6) soundingPcs.push(pc);
 
         return {
-            empty: false,
-            score: total * best.sim,
-            root: best.root,
-            bass: bass,
-            quality: best.quality,
-            tensions: tensions,
+            root: chord.root,
+            bass,
+            quality: chord.quality,
+            tensions,
             pcs: [...tonePcs].sort((a, b) => a - b),
-            soundingPcs: soundingPcs
+            soundingPcs
         };
     }
 
     // --- Per-bar DP: best split of the bar's units into <=4 segments ---
+    // A span's DP score is its energy x cosine: cosine is scale-free, so a long
+    // span explaining a lot of weight must outscore two short ones.
     const rawSegments = [];
     const unitsPerBar = bpb * G;
     const nBars = Math.ceil(totalUnits / unitsPerBar);
@@ -228,16 +270,29 @@ function analyzeMidiToSegments(notes, bpb) {
         const B = Math.min(unitsPerBar, totalUnits - s0);
         if (B <= 0) break;
 
-        const memo = {};
-        const info = (a, b) => memo[a * 1000 + b] || (memo[a * 1000 + b] = segmentInfo(s0 + a, s0 + b));
-        const whole = info(0, B);
-        if (whole.empty) continue;
-
         let barEnergy = 0;
         for (let u = s0; u < s0 + B; u++) barEnergy += unitChroma[u].reduce((a, x) => a + x, 0);
-        const lambda = ANALYSIS_CFG.segmentPenalty * (barEnergy / B) * G;
+        if (barEnergy < 1e-6) continue;   // silent bar
+        const cutCost = (j) => (metricLevel(j / G, bpb) === 1 ? CFG.cutPenaltyMid : CFG.cutPenaltyWeak)
+            * (barEnergy / B) * G;
 
-        const K = Math.min(ANALYSIS_CFG.maxSegmentsPerBar, B);
+        const memo = new Map();
+        const span = (a, b) => {
+            const key = a * (B + 1) + b;
+            let v = memo.get(key);
+            if (!v) {
+                const m = measureSpan(s0 + a, s0 + b);
+                const chord = m.total < 1e-6 ? null : pickChord(m);
+                v = { m, chord, score: chord ? m.total * chord.sim : 0 };
+                memo.set(key, v);
+            }
+            return v;
+        };
+
+        // dp[i][k]: best score of units [0, i) cut into k segments. The k axis
+        // only enforces maxSegmentsPerBar; with whole-beat units it binds only
+        // in bars longer than 4 beats.
+        const K = Math.min(CFG.maxSegmentsPerBar, B);
         const NEG = -1e18;
         const dp = Array.from({ length: B + 1 }, () => new Array(K + 1).fill(NEG));
         const par = Array.from({ length: B + 1 }, () => new Array(K + 1).fill(-1));
@@ -246,8 +301,7 @@ function analyzeMidiToSegments(notes, bpb) {
             for (let k = 1; k <= K; k++) {
                 for (let j = k - 1; j < i; j++) {
                     if (dp[j][k - 1] === NEG) continue;
-                    const seg = info(j, i);
-                    const sc = dp[j][k - 1] + (seg.empty ? 0 : seg.score) - (k > 1 ? lambda : 0);
+                    const sc = dp[j][k - 1] + span(j, i).score - (j > 0 ? cutCost(j) : 0);
                     if (sc > dp[i][k]) { dp[i][k] = sc; par[i][k] = j; }
                 }
             }
@@ -259,13 +313,9 @@ function analyzeMidiToSegments(notes, bpb) {
         let i = B, k = bestK;
         while (k > 0) { const j = par[i][k]; cuts.unshift([j, i]); i = j; k--; }
         cuts.forEach(([a, b]) => {
-            const seg = info(a, b);
-            if (seg.empty) return;
-            rawSegments.push({
-                startBeat: (s0 + a) / G, endBeat: (s0 + b) / G,
-                root: seg.root, bass: seg.bass, quality: seg.quality,
-                tensions: seg.tensions, pcs: seg.pcs, soundingPcs: seg.soundingPcs
-            });
+            const { m, chord } = span(a, b);
+            if (!chord) return;
+            rawSegments.push({ startBeat: (s0 + a) / G, endBeat: (s0 + b) / G, ...describeChord(m, chord) });
         });
     }
 

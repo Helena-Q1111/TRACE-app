@@ -28,12 +28,35 @@ let cageTicks = [];            // the 12 corners + their distance in model units
 let tetherLine = null;         // current chord -> tonic
 let hudCanvas = null, hudCtx = null;
 
-// Beacon geometry as a function of tonal weight. The span has to be wide enough
-// to read at a glance - I and the two dominants clearly larger, vii clearly the
-// smallest - and every landmark stays bigger than a progression sphere (0.08,
-// 0.12 when current) so landmarks never get mistaken for the music.
-const BEACON_MIN_R = 0.075 * SCENE_SCALE, BEACON_MAX_R = 0.245 * SCENE_SCALE;
+// Beacon geometry as a function of tonal weight: I and the two dominants
+// larger, vii smallest. Kept in the same size range as the progression spheres
+// (0.08, 0.12 when current) - at up to 0.245 the landmarks out-shouted the
+// music they are only meant to anchor. What separates a landmark from a chord
+// now is that it is flat (unlit), translucent and always there.
+const BEACON_MIN_R = 0.05 * SCENE_SCALE, BEACON_MAX_R = 0.12 * SCENE_SCALE;
 const GLOW_MIN = 0.85, GLOW_MAX = 1.0;
+
+// A landmark is a degree of the (relative-major) key the embedding is built in,
+// so it takes the colour a chord of that degree gets under the active scheme:
+// T/S/D in the function scheme, major/minor/diminished in the quality one.
+// `root` is the interval above the tonic; with no bar, chordFunction measures
+// from estimatedTonic, so adding it back makes the function come out by degree.
+function landmarkQuality(degree) {
+    if (degree.includes('°')) return 'dim';
+    return degree === degree.toUpperCase() ? 'major' : 'minor';
+}
+//
+// Except I. Home has to be findable at a glance from anywhere in the space,
+// so it keeps only a hint of its scheme colour on the dark theme and is
+// otherwise white, with a brighter white glow and a place in the bloom layer;
+// on paper it goes near-black instead. Returned in display (sRGB) space.
+const TONIC_WHITE_MIX = 0.72;
+function landmarkColor(n) {
+    const c = getThemedChordColor({ root: (estimatedTonic + n.root) % 12, quality: n.quality });
+    if (n.degree !== 'I') return c;
+    return isLightBg() ? c.lerp(new THREE.Color(0x14141f), 0.7)
+                       : c.lerp(new THREE.Color(0xffffff), TONIC_WHITE_MIX);
+}
 
 function anchorColors() {
     return isLightBg()
@@ -75,27 +98,30 @@ function buildLandmarks() {
         const w = lm.weight;
         const radius = BEACON_MIN_R + (BEACON_MAX_R - BEACON_MIN_R) * w;
 
-        // MeshBasicMaterial: unlit, so a landmark reads at full strength from
-        // anywhere and the bloom pass gives it a halo on the dark theme.
+        // MeshBasicMaterial: unlit, so a landmark reads the same from any
+        // angle. Not in the bloom layer - its only halo is the faint sprite.
         const mesh = new THREE.Mesh(
             new THREE.SphereGeometry(radius, 24, 24),
-            new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true })
+            new THREE.MeshBasicMaterial({ transparent: true, toneMapped: false })
         );
         mesh.position.copy(pos);
+        if (lm.degree === 'I') mesh.layers.enable(BLOOM_LAYER);   // home glows
         landmarkGroup.add(mesh);
 
         const glow = new THREE.Sprite(new THREE.SpriteMaterial({
             map: getGlowTexture(),
             transparent: true,
             blending: THREE.AdditiveBlending,
-            depthWrite: false
+            depthWrite: false,
+            toneMapped: false
         }));
         const g = GLOW_MIN + (GLOW_MAX - GLOW_MIN) * w;
-        const gs = g * 2.2 * SCENE_SCALE * (0.45 + 0.55 * w);
+        const gs = g * (lm.degree === 'I' ? 2.4 : 1.3) * SCENE_SCALE * (0.45 + 0.55 * w);
         glow.scale.set(gs, gs, 1);
         mesh.add(glow);
 
-        landmarkNodes.push({ degree: lm.degree, weight: w, r: lm.r, pos, mesh, glow });
+        landmarkNodes.push({ degree: lm.degree, root: lm.root, quality: landmarkQuality(lm.degree),
+            weight: w, r: lm.r, coords: lm.coords, pos, mesh, glow });
 
         // Only the tonic keeps the orbiting star shell - it is what marks it as
         // home rather than just another labelled point.
@@ -112,7 +138,7 @@ function buildLandmarks() {
             geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             tonicStars = new THREE.Points(geo, new THREE.PointsMaterial({
                 color: 0xdde4ff, size: 0.055 * SCENE_SCALE, map: getGlowTexture(),
-                transparent: true, opacity: 0.8, depthWrite: false,
+                transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false,
                 blending: THREE.AdditiveBlending, sizeAttenuation: true
             }));
             tonicStars.position.copy(pos);
@@ -149,13 +175,13 @@ function buildCage() {
 
     hullLines = new THREE.LineSegments(
         new THREE.EdgesGeometry(geo),
-        new THREE.LineBasicMaterial({ transparent: true, depthWrite: false })
+        new THREE.LineBasicMaterial({ transparent: true, depthWrite: false, toneMapped: false })
     );
     hullLines.position.copy(centre);
     scene.add(hullLines);
 
     hullSkin = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-        transparent: true, depthWrite: false, side: THREE.BackSide
+        transparent: true, depthWrite: false, side: THREE.BackSide, toneMapped: false
     }));
     hullSkin.position.copy(centre);
     scene.add(hullSkin);
@@ -195,7 +221,7 @@ function buildTether() {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
     tetherLine = new THREE.Line(geo, new THREE.LineBasicMaterial({
-        transparent: true, depthWrite: false
+        transparent: true, depthWrite: false, toneMapped: false
     }));
     tetherLine.frustumCulled = false;
     scene.add(tetherLine);
@@ -205,35 +231,39 @@ function styleLandmarks() {
     const c = anchorColors();
     const light = isLightBg();
     landmarkNodes.forEach((n) => {
-        n.mesh.material.color.setHex(light ? 0x0a0a12 : 0xffffff);
-        // On the dark theme the additive glow carries most of a landmark's
-        // presence, so the sphere itself can fade a long way with weight. On
-        // paper-white there is no glow and no bloom, and a translucent dark dot
-        // just turns light grey - so weight is carried almost entirely by size
-        // there, and opacity stays near solid.
-        n.mesh.material.opacity = light ? 0.78 + 0.22 * n.weight
-                                        : 0.35 + 0.65 * n.weight;
+        const isHome = n.degree === 'I';
+        n.color = landmarkColor(n);
+        n.css = '#' + n.color.getHexString();   // the HUD marker uses it too (sRGB)
+        n.sceneColor = n.color.clone().convertSRGBToLinear();
+        n.mesh.material.color.copy(n.sceneColor);
+        // On paper-white there is no glow, and a translucent dot just turns
+        // pale - so weight is carried almost entirely by size there, and
+        // opacity stays near solid.
+        n.mesh.material.opacity = isHome ? 0.95
+            : light ? 0.78 + 0.22 * n.weight : 0.45 + 0.40 * n.weight;
         // Additive glow does nothing on white, and the falloff texture under
         // normal blending only lands ~5% ink - not worth the draw. On paper the
         // HUD's marker dot is what makes a landmark findable instead.
         n.glow.visible = !light;
-        n.glow.material.opacity = 0.30 + 0.55 * n.weight;
+        n.glow.material.color.copy(n.sceneColor);
+        n.glow.material.opacity = isHome ? 0.55 : 0.10 + 0.20 * n.weight;
     });
     if (tonicStars) {
-        tonicStars.material.color.setHex(light ? 0x44445a : 0xdde4ff);
+        const tonic = landmarkNodes.find(n => n.degree === 'I');
+        if (tonic) tonicStars.material.color.copy(tonic.sceneColor);
         tonicStars.material.blending = light ? THREE.NormalBlending : THREE.AdditiveBlending;
-        tonicStars.material.opacity = light ? 0.55 : 0.8;
+        tonicStars.material.opacity = light ? 0.55 : 0.4;
         tonicStars.material.needsUpdate = true;
     }
     if (hullLines) {
-        hullLines.material.color.setHex(c.hull);
+        hullLines.material.color.copy(sceneColor(c.hull));
         // a thin grey line on white carries far less than an additive one on black
         hullLines.material.opacity = light ? 0.50 : 0.24;
         hullLines.material.blending = light ? THREE.NormalBlending : THREE.AdditiveBlending;
         hullLines.material.needsUpdate = true;
     }
     if (hullSkin) {
-        hullSkin.material.color.setHex(c.hull);
+        hullSkin.material.color.copy(sceneColor(c.hull));
         // Barely there. Additive blending over a near-black sky makes this go a
         // long way: at 0.028 the facets read as solid grey panels and the scene
         // turns into the inside of a polyhedron rather than open space.
@@ -242,7 +272,7 @@ function styleLandmarks() {
         hullSkin.material.needsUpdate = true;
     }
     if (tetherLine) {
-        tetherLine.material.color.setHex(c.hull);
+        tetherLine.material.color.copy(sceneColor(c.hull));
         tetherLine.material.opacity = light ? 0.45 : 0.22;
         tetherLine.material.blending = light ? THREE.NormalBlending : THREE.AdditiveBlending;
         tetherLine.material.needsUpdate = true;
@@ -257,6 +287,7 @@ function setAnchorsVisible(on) {
     if (hullSkin) hullSkin.visible = on;
     if (tetherLine) tetherLine.visible = on;
     if (hudCanvas) hudCanvas.hidden = !on;
+    applyViewVisibility();       // views.js: the cage only belongs to the original view
 }
 
 // ------------------------------------------------------------------ per frame
@@ -303,8 +334,8 @@ function updateTether() {
     if (!tetherLine || !landmarkNodes.length || progression.length === 0) return;
     const chord = progression[currentIndex];
     if (!chord) return;
-    const from = displayCoords(chord.coords);
-    const home = landmarkNodes[0].pos;      // I is exported first
+    const from = chordScenePos(currentIndex).toArray();
+    const home = viewHomeFor(new THREE.Vector3(...from)) || landmarkNodes[0].pos;   // I is exported first
     const attr = tetherLine.geometry.attributes.position;
     attr.setXYZ(0, from[0], from[1], from[2]);
     attr.setXYZ(1, home.x, home.y, home.z);
@@ -319,7 +350,7 @@ function panelRects(w, h) {
     if (!host) return [];
     const base = host.getBoundingClientRect();
     const out = [];
-    ['circleCanvas', 'aeCanvas'].forEach((id) => {
+    ['circleCanvas', 'aeCanvas', 'movePanel', 'viewBar'].forEach((id) => {
         const el = document.getElementById(id);
         if (!el || el.offsetParent === null) return;
         const r = el.getBoundingClientRect();
@@ -366,7 +397,7 @@ function drawAnchorHud() {
     hudCtx.font = '500 9px "IBM Plex Mono", Consolas, monospace';
     hudCtx.textAlign = 'center';
     hudCtx.textBaseline = 'middle';
-    cageTicks.forEach((tick) => {
+    if (!viewActive()) cageTicks.forEach((tick) => {
         const p = projectPoint(tick.pos, w, h);
         if (!p.onScreen) return;
         hudCtx.fillStyle = c.faint;
@@ -381,7 +412,7 @@ function drawAnchorHud() {
     });
 
     // --- landmarks: on-screen label, or an edge chevron pointing off-screen ---
-    landmarkNodes.forEach((n) => {
+    if (viewMode !== 'tunnel') landmarkNodes.forEach((n) => {
         const p = projectPoint(n.pos, w, h);
         const alpha = 0.45 + 0.55 * n.weight;
         const size = 9 + 4 * n.weight;
@@ -393,7 +424,7 @@ function drawAnchorHud() {
             // is what actually locates a landmark. Radius carries the weight.
             const dot = 1.8 + 3.2 * n.weight;
             hudCtx.globalAlpha = alpha;
-            hudCtx.fillStyle = c.ink;
+            hudCtx.fillStyle = n.css || c.ink;
             hudCtx.beginPath();
             hudCtx.arc(p.x, p.y, dot, 0, Math.PI * 2);
             hudCtx.fill();
@@ -445,7 +476,7 @@ function drawAnchorHud() {
         const lx = ex - ux * 13, ly = ey - uy * 13;
 
         hudCtx.globalAlpha = alpha * 0.75;
-        hudCtx.fillStyle = c.dim;
+        hudCtx.fillStyle = n.css || c.dim;
         hudCtx.save();
         hudCtx.translate(ex, ey);
         hudCtx.rotate(Math.atan2(uy, ux));
@@ -468,7 +499,7 @@ function drawAnchorHud() {
     });
 
     // --- distance home, printed once next to the tonic's marker or chevron ---
-    if (progression.length > 0 && progression[currentIndex] && landmarkNodes.length) {
+    if (viewMode !== 'tunnel' && progression.length > 0 && progression[currentIndex] && landmarkNodes.length) {
         const d = euclideanDistance(progression[currentIndex].coords, latentSpace.tonic);
         const home = landmarkNodes[0];
         const p = projectPoint(home.pos, w, h);

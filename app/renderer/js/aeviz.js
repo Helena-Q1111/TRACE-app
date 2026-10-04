@@ -104,18 +104,9 @@ function aeForward(modelKey, key) {
     return out;
 }
 
-// TPS target, mirroring data/chord_dataset.py: circle-of-fifths ring distance
-// between the roots plus the symmetric difference of the pitch-class sets.
-function aeTps(a, b) {
-    const pa = (7 * a.root) % 12, pb = (7 * b.root) % 12;
-    const d = Math.abs(pa - pb);
-    const j = Math.min(d, 12 - d);
-    const A = new Set(a.pcs), B = new Set(b.pcs);
-    let k = 0;
-    A.forEach(v => { if (!B.has(v)) k++; });
-    B.forEach(v => { if (!A.has(v)) k++; });
-    return { j, k, delta: j + k };
-}
+// TPS target, mirroring data/chord_dataset.py - shared with the move panel
+// (tpsFrameTerms in chords.js), so both show the same j and k.
+const aeTps = (a, b) => tpsFrameTerms(a, b);
 
 function aeChordKey(chord) {
     return transposedChordKey(chord.root, chord.bass, chord.pcs, chord.bar);

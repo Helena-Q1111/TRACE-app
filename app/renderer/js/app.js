@@ -19,8 +19,7 @@ function animate() {
 
             // Create interpolation animation to next chord
             if (progression[nextIndex]) {
-                const nextCoords = displayCoords(progression[nextIndex].coords);
-                lightTarget.set(...nextCoords);
+                lightTarget.copy(chordScenePos(nextIndex));
                 const nextDurMs = (progression[nextIndex].durBeats || beatsPerBar) * beatDurationMs;
 
                 // Animate light follower (never longer than the segment itself)
@@ -60,7 +59,7 @@ function animate() {
         const chord = progression[currentIndex];
         // Set initial position if first time
         if (!lightInitialized) {
-            lightFollower.position.set(...displayCoords(chord.coords));
+            lightFollower.position.copy(chordScenePos(currentIndex));
             lightTarget.copy(lightFollower.position);
             lightInitialized = true;
         }
@@ -69,22 +68,29 @@ function animate() {
     // Camera: smooth-follow current chord, orbit around it
     updateCamera();
 
-    // Sphere highlight: current chord glows brighter and larger
-    // (emissive scaled down on the light theme so colors don't wash out)
-    // Off-key (离调) chords keep an elevated glow even when not current.
+    // Sphere highlight: the current chord is larger with a stronger halo.
+    // Emissive stays low so the ball keeps its own hue: measured on a #3d9bff
+    // chord, emissive 0.9 rendered 205,217,222 (white), 0.35 still 174,202,214,
+    // 0.15 gives 141,185,204. The glow is the halo sprite
+    // (chords.js), in the chord's colour. Off-key (离调) chords keep an
+    // elevated halo even when not current.
     const emissiveScale = bgThemeKey === 'light' ? 0.35 : 1.0;
     activeChordSpheres.forEach((sphere, idx) => {
         const fade = getFadeFactor(idx);
-        const offKeyBoost = progression[idx] && progression[idx].offKey ? 2.2 : 1.0;
+        const offKeyBoost = progression[idx] && progression[idx].offKey ? 1.6 : 1.0;
+        const halo = sphere.userData.halo;
         if (idx === currentIndex) {
-            sphere.material.emissiveIntensity = (offKeyBoost > 1 ? 1.4 : 1.0) * emissiveScale;
+            sphere.material.emissiveIntensity = 0.15 * emissiveScale;
             sphere.scale.setScalar(1.5);
             sphere.material.opacity = 1.0;
+            halo.material.opacity = Math.min(0.9, 0.55 * offKeyBoost);
         } else {
             sphere.material.emissiveIntensity =
-                Math.max(0.1, 0.3 - (currentIndex - idx) * 0.1) * offKeyBoost * emissiveScale * fade;
+                Math.max(0.05, 0.12 - (currentIndex - idx) * 0.035) * emissiveScale * fade;
             sphere.scale.setScalar(1.0);
             sphere.material.opacity = fade;
+            halo.material.opacity =
+                Math.max(0.05, 0.18 - (currentIndex - idx) * 0.03) * offKeyBoost * fade;
         }
         const label = activeChordLabels[idx];
         if (label && label.visible) {
@@ -110,6 +116,8 @@ function animate() {
     }
 
     // Enhanced rendering updates
+    updateChordLabels();
+    updateViews();
     updateCosmos(t);
     updateChordClouds(t);
     updateTrailFlow(t);
@@ -117,8 +125,8 @@ function animate() {
     updateRadar();
     updateAeViz();
 
-    // Render with bloom post-processing
-    composer.render();
+    // Render with (selective) bloom post-processing
+    renderFrame();
 
     // Video export: mirror this freshly rendered frame into the recording
     // (same task as the render, so the buffer is guaranteed still valid)
@@ -130,8 +138,11 @@ initScene();
 initCosmos();
 initAudio();
 bindControls();
+bindProjects();          // MIDI import, start prompt, two-slot project cache
+bindMovePanel();        // move panel timeline: click to jump
 initChordSpace();       // diatonic landmarks + boundary shell + heads-up anchors
 initRadar();            // circle-of-fifths tension radar (top-right)
 initAeViz();            // autoencoder panel (bottom-right)
-loadEmbeddingTable();   // full (root, pcs) -> coords table
+embeddingTableReady = loadEmbeddingTable();   // full (root, pcs) -> coords table
+embeddingTableReady.then(initViews);           // experimental view layouts need the table
 animate();

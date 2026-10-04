@@ -37,7 +37,9 @@ function makeNebulaTexture(hexColor) {
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, size, size);
     }
-    return new THREE.CanvasTexture(canvas);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.encoding = THREE.sRGBEncoding;   // canvas pixels are sRGB (see sceneColor)
+    return texture;
 }
 
 // Random point in a spherical shell [rMin, rMax]
@@ -75,6 +77,7 @@ function createChordCloud(position, colorHex, radius, count, baseSize) {
         opacity: 0.85,
         depthWrite: false,
         blending: bgThemeKey === 'light' ? THREE.NormalBlending : THREE.AdditiveBlending,
+        toneMapped: false,     // colorHex arrives already linear (getSceneChordColor)
         sizeAttenuation: true
     });
 
@@ -99,13 +102,13 @@ function updateChordClouds(t) {
             // Bigger breathing pulse for the current chord
             const pulse = 1.4 + 0.25 * Math.sin(t * 2.2 + s.phase);
             cloud.scale.setScalar(pulse);
-            cloud.material.opacity = 0.95;
+            cloud.material.opacity = 0.7;
         } else {
             cloud.scale.setScalar(1.0);
             // Off-key chords keep a denser, brighter halo
             const boost = (progression[idx] && progression[idx].offKey) ? 1.6 : 1.0;
             cloud.material.opacity =
-                Math.min(0.9, Math.max(0.15, 0.5 - Math.abs(currentIndex - idx) * 0.08) * boost) * fade;
+                Math.min(0.55, Math.max(0.08, 0.3 - Math.abs(currentIndex - idx) * 0.05) * boost) * fade;
         }
     });
 }

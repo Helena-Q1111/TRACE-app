@@ -3,10 +3,10 @@
 function initScene() {
     const container = document.getElementById('canvas');
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x030308);
+    scene.background = sceneColor(BG_THEMES.dark.bg);
     // Linear distance fog. Only the contents of the latent space take it; the
     // sky opts out in cosmos.js (see FOG_NEAR / FOG_FAR in config.js).
-    scene.fog = new THREE.Fog(0x030308, FOG_NEAR, FOG_FAR);
+    scene.fog = new THREE.Fog(sceneColor(BG_THEMES.dark.bg), FOG_NEAR, FOG_FAR);
 
     // Before any progression loads, look at the tonic (I) reference beacon
     tonicDisplayPos = new THREE.Vector3(...displayCoords(TONIC_I_COORDS));
@@ -47,6 +47,13 @@ function initScene() {
         RENDER_CFG.bloom.threshold
     );
     composer.addPass(bloomPass);
+    // The scene is already tone-mapped when it is rendered into the composer's
+    // target (r128 applies toneMapping to render targets too). The bloom pass
+    // then copies to screen through a MeshBasicMaterial, which tone-maps a
+    // SECOND time - ACES twice lifts mid-tones and bleaches colour. The copy
+    // only has to sRGB-encode.
+    bloomPass.basic.toneMapped = false;
+    setupSelectiveBloom(container.clientWidth, container.clientHeight);
 
     // Log GPU context loss explicitly (helps diagnose "particles vanished")
     renderer.domElement.addEventListener('webglcontextlost', (e) => {
@@ -121,8 +128,7 @@ function setupCameraControls() {
 // Snap light follower to the current chord (used on load / restart / manual jump)
 function snapLightToCurrent() {
     if (progression.length === 0) return;
-    const chord = progression[currentIndex];
-    lightFollower.position.set(...displayCoords(chord.coords));
+    lightFollower.position.copy(chordScenePos(currentIndex));
     lightTarget.copy(lightFollower.position);
     lightInitialized = true;
 }
@@ -131,18 +137,33 @@ function snapLightToCurrent() {
 const _camOffset = new THREE.Vector3();
 let tonicDisplayPos = null;   // set in initScene; idle camera target
 function updateCamera() {
-    const desired = (progression.length > 0 && lightInitialized)
-        ? lightFollower.position
-        : tonicDisplayPos;
-    followTarget.lerp(desired, 0.018);
+    // The experimental views (views.js) orbit a fixed point - I, or the
+    // playhead on the tunnel's home axis - instead of chasing the chord.
+    const viewTarget = viewCameraTarget();
+    if (viewTarget) {
+        followTarget.lerp(viewTarget, viewMode === 'tunnel' ? 0.12 : 0.05);
+    } else {
+        const desired = (progression.length > 0 && lightInitialized)
+            ? lightFollower.position
+            : tonicDisplayPos;
+        followTarget.lerp(desired, 0.018);
+    }
 
-    if (!mouseInteracting) {
+    // The I-centred views hold still so their orientation (C ahead) stays readable.
+    if (!mouseInteracting && !viewTarget) {
         camSpherical.theta += 0.00012;
     }
 
     _camOffset.setFromSpherical(camSpherical);
     camera.position.copy(followTarget).add(_camOffset);
     camera.lookAt(followTarget);
+    // The renderer refreshes camera.matrixWorldInverse only inside render(),
+    // but the HUD (landmark dots, labels, chevrons) projects points with it
+    // BEFORE that - so without this it drew with last frame's view. Any
+    // rotation then showed each landmark twice, the 3D ball and its 2D marker
+    // one frame apart, which read as a doubled I and ghosting on every
+    // landmark.
+    camera.updateMatrixWorld();
 }
 
 function onWindowResize() {
@@ -153,4 +174,53 @@ function onWindowResize() {
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
     composer.setSize(w, h);
+    const pr = renderer.getPixelRatio();
+    bloomSource.setSize(w * pr, h * pr);
+}
+
+// ---- Selective bloom ----
+// UnrealBloomPass extracts its bright areas from the frame it is handed and
+// adds the blurred result back onto that same frame. Only the FIRST step is
+// redirected here: the bright-area filter reads a second render that contains
+// just the BLOOM_LAYER objects, while the blur, the composite and the final
+// copy to screen are untouched - so tone mapping and colour encoding go through
+// exactly the path they always did, and nothing outside the layer changes.
+//
+// The bloom render also leaves the lights out (they live on layer 0), so a
+// sphere contributes only its EMISSIVE colour. That is what makes a chord's
+// halo its own hue: the lit render's white specular highlight was the part
+// that used to clip, and a clipped halo is white.
+let bloomSource = null;
+
+function setupSelectiveBloom(w, h) {
+    const pr = renderer.getPixelRatio();
+    bloomSource = new THREE.WebGLRenderTarget(w * pr, h * pr, {
+        minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat
+    });
+    // The pass assigns readBuffer.texture to tDiffuse every frame; this
+    // uniform ignores that and always serves the layer-only render. The
+    // material shares this uniforms object, so replacing the entry is enough.
+    bloomPass.highPassUniforms.tDiffuse = {
+        get value() { return bloomSource.texture; },
+        set value(_) { /* keep the bloom-layer source */ }
+    };
+}
+
+// One frame: the bloom-layer render first (skipped when bloom is off, as on
+// the paper theme - strength 0 already zeroes its contribution), then the
+// composer exactly as before.
+function renderFrame() {
+    if (bloomPass.strength > 0) {
+        const mask = camera.layers.mask;
+        const bg = scene.background;
+        camera.layers.set(BLOOM_LAYER);
+        scene.background = null;             // clear to black: only the layer counts
+        renderer.setRenderTarget(bloomSource);
+        renderer.clear();
+        renderer.render(scene, camera);
+        renderer.setRenderTarget(null);
+        scene.background = bg;
+        camera.layers.mask = mask;
+    }
+    composer.render();
 }
