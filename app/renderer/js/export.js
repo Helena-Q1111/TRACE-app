@@ -47,7 +47,7 @@ function pickRecorderMime() {
 async function startVideoExport() {
     if (isExporting) { finishVideoExport(); return; }   // second click = stop early
     if (progression.length === 0) {
-        alert('请先导入 MIDI，再导出视频');
+        alert('Import a MIDI file before exporting a video.');
         return;
     }
     isExporting = true;
@@ -109,7 +109,7 @@ async function startVideoExport() {
     _exportExt = _exportMime.includes('mp4') ? 'mp4' : 'webm';
     console.log(`Video export container: ${_exportMime || 'browser default'} (.${_exportExt})`);
     if (_exportExt !== 'mp4') {
-        console.warn('此 Chromium 版本不支持 H.264+AAC MP4 编码，回退为 WebM（可用 ffmpeg 转封装）');
+        console.warn('This Chromium build cannot encode H.264+AAC MP4; falling back to WebM (remux with ffmpeg if needed)');
     }
     _exportRecorder.ondataavailable = (e) => { if (e.data.size > 0) _exportChunks.push(e.data); };
     _exportRecorder.onstop = saveExportedVideo;
@@ -165,22 +165,22 @@ async function logExportCodecCheck(blob) {
 
         const isMp4 = _findBytes(head.slice(0, 16), 'ftyp');
         const isWebm = head[0] === 0x1A && head[1] === 0x45 && head[2] === 0xDF && head[3] === 0xA3;
-        const lines = [`导出自检: 容器=${isMp4 ? 'MP4' : isWebm ? 'WebM' : '未知!'} 大小=${(blob.size / 1e6).toFixed(1)}MB`];
+        const lines = [`Export check: container=${isMp4 ? 'MP4' : isWebm ? 'WebM' : 'unknown!'} size=${(blob.size / 1e6).toFixed(1)}MB`];
 
         if (isMp4) {
             const h264 = has('avc1') || has('avc3');
             const vp9 = has('vp09') || has('vpcC');
             const aac = has('mp4a');
             const opus = has('Opus') || has('dOps');
-            lines.push(`视频: ${h264 ? 'H.264 ✓' : vp9 ? 'VP9 ✗(普通播放器不认 MP4 内的 VP9)' : '未检出!'}`);
-            lines.push(`音频: ${aac ? 'AAC ✓' : opus ? 'Opus ✗(普通播放器不认 MP4 内的 Opus)' : '未检出(可能无声)'}`);
-            if (!has('moov')) lines.push('警告: 缺少 moov 索引，文件可能截断/未正常收尾');
+            lines.push(`Video: ${h264 ? 'H.264 ✓' : vp9 ? 'VP9 ✗ (most players reject VP9 inside MP4)' : 'not found!'}`);
+            lines.push(`Audio: ${aac ? 'AAC ✓' : opus ? 'Opus ✗ (most players reject Opus inside MP4)' : 'not found (may be silent)'}`);
+            if (!has('moov')) lines.push('Warning: no moov index - the file may be truncated or not finalised');
         } else if (isWebm) {
-            lines.push(`视频: ${has('V_VP9') ? 'VP9' : has('V_VP8') ? 'VP8' : '?'}  音频: ${has('A_OPUS') ? 'Opus' : '?'}  (WebM 用 VLC/Chrome 播放)`);
+            lines.push(`Video: ${has('V_VP9') ? 'VP9' : has('V_VP8') ? 'VP8' : '?'}  Audio: ${has('A_OPUS') ? 'Opus' : '?'}  (play WebM in VLC or Chrome)`);
         }
         console.log(lines.join('\n'));
     } catch (e) {
-        console.warn('导出自检失败:', e);
+        console.warn('Export check failed:', e);
     }
 }
 
@@ -222,6 +222,6 @@ function exportCaptureFrame() {
 function setExportBtnState(recording) {
     const btn = document.getElementById('exportBtn');
     if (!btn) return;
-    btn.textContent = recording ? '● 录制中' : '导出视频';
+    btn.textContent = recording ? '● Recording' : 'Export video';
     btn.classList.toggle('recording', recording);
 }

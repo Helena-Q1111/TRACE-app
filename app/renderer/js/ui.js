@@ -29,10 +29,10 @@ const DELTA_SCALE = 14;              // full stack bar: j <= 6, k rarely > 8
 const homeDistance = (c) => euclideanDistance(c.coords, TONIC_I_COORDS);
 
 function updateMovePanel() {
-    const panel = document.getElementById('movePanel');
-    if (!panel) return;
-    panel.hidden = progression.length === 0;
-    if (panel.hidden) return;
+    const dock = document.getElementById('infoDock');
+    if (!dock) return;
+    dock.hidden = progression.length === 0;
+    if (dock.hidden) return;
 
     const cur = progression[currentIndex];
     const prev = currentIndex > 0 ? progression[currentIndex - 1] : null;
@@ -42,9 +42,14 @@ function updateMovePanel() {
     };
     chip(document.getElementById('mvFrom'), prev);
     chip(document.getElementById('mvTo'), cur);
-    document.getElementById('mvWhere').textContent = prev
-        ? `chord ${currentIndex} → ${currentIndex + 1} · bar ${cur.bar}`
-        : `chord 1 / ${progression.length} · bar ${cur.bar}`;
+    // long readings (G#7(♭13)/♯5) step the readout down instead of cutting it
+    const len = (cur.absLabel || '').length;
+    document.getElementById('movePanel').dataset.len = len > 11 ? 'xl' : len > 7 ? 'l' : '';
+    document.getElementById('mvRoman').textContent = cur.label || '';
+    document.getElementById('mvFrom').hidden = !prev;
+    const pad = (n) => String(n).padStart(String(progression.length).length, '0');
+    document.getElementById('mvWhere').textContent =
+        `bar ${String(cur.bar).padStart(2, '0')} · ${pad(currentIndex + 1)}/${progression.length}`;
 
     const t = prev ? tpsMove(prev, cur) : { i: 0, j: 0, k: 0, delta: 0 };
     const dash = (v) => (prev ? String(v) : '–');
@@ -271,6 +276,14 @@ function updateMoveHistory() {
 
 // Timeline click -> nearest chord
 function bindMovePanel() {
+    // Minimise to the head + chord line, like the autoencoder's pill
+    const panel = document.getElementById('movePanel');
+    const min = document.getElementById('mvMin');
+    if (panel && min) min.onclick = () => {
+        const on = panel.classList.toggle('minimized');
+        min.innerHTML = on ? '+' : '&ndash;';
+        min.title = on ? 'Expand' : 'Minimise';
+    };
     const arc = document.getElementById('mvArc');
     if (!arc) return;
     arc.addEventListener('click', (e) => {
@@ -347,7 +360,7 @@ const KEY_OPTIONS = (() => {
 function keyOptionHtml(selected) {
     return KEY_OPTIONS.map((k, i) => {
         const sel = (k.tonic === selected.tonic && k.mode === selected.mode) ? ' selected' : '';
-        return `<option value="${i}"${sel}>${keyName(k)}${k.mode === 'major' ? ' 大调' : ' 小调'}</option>`;
+        return `<option value="${i}"${sel}>${keyName(k)}${k.mode === 'major' ? ' major' : ' minor'}</option>`;
     }).join('');
 }
 
@@ -365,11 +378,11 @@ function renderModList() {
         const row = document.createElement('div');
         row.className = 'mod-row';
         row.innerHTML = `
-            <span>第</span>
+            <span>Bar</span>
             <input type="number" class="mod-bar" min="1" value="${m.bar}">
-            <span>小节 →</span>
+            <span>→</span>
             <select class="key-select mod-key">${keyOptionHtml(m)}</select>
-            <button class="icon-btn mod-del" title="删除">×</button>
+            <button class="icon-btn mod-del" title="Remove">×</button>
         `;
         row.querySelector('.mod-bar').onchange = (e) => {
             m.bar = Math.max(1, parseInt(e.target.value) || 1);
@@ -451,6 +464,38 @@ function bindSidebar() {
     });
 }
 
+// ---- Sidebar navigation ----
+// Every control lives on one scrolling page; the tabs on the right edge jump
+// to a group and mark the group you are in. When the page fits without
+// scrolling the click still lands: the group's title flashes.
+function bindSidebarNav() {
+    const scroller = document.getElementById('sidebarScroll');
+    const tabs = [...document.querySelectorAll('#sidebarTabs .sidebar-tab')];
+    const groupOf = (key) => scroller.querySelector(`.section[data-nav="${key}"]`);
+    const mark = (key) => tabs.forEach(t => t.classList.toggle('active', t.dataset.nav === key));
+    let clickedAt = 0;
+    tabs.forEach((tab) => {
+        tab.onclick = () => {
+            const g = groupOf(tab.dataset.nav);
+            if (!g) return;
+            clickedAt = performance.now();
+            mark(tab.dataset.nav);
+            scroller.scrollTo({ top: g.offsetTop - scroller.offsetTop, behavior: 'smooth' });
+            g.classList.remove('flash');
+            void g.offsetWidth;           // restart the animation
+            g.classList.add('flash');
+        };
+    });
+    scroller.addEventListener('scroll', () => {
+        if (performance.now() - clickedAt < 600) return;     // a tab click is scrolling us
+        const y = scroller.scrollTop + 24;
+        let cur = tabs[0].dataset.nav;
+        tabs.forEach((t) => { const g = groupOf(t.dataset.nav); if (g && g.offsetTop - scroller.offsetTop <= y) cur = t.dataset.nav; });
+        if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) cur = tabs[tabs.length - 1].dataset.nav;
+        mark(cur);
+    });
+}
+
 // ---- Appearance: chord colors, comet schemes, background theme, sliders ----
 function bindAppearance() {
     // Step 1: chord scheme (function3 / quality4)
@@ -473,16 +518,11 @@ function bindAppearance() {
         };
     });
 
-    // Collapsible section toggles
-    document.querySelectorAll('.section-title.toggle').forEach((title) => {
-        title.onclick = () => {
-            document.getElementById(title.dataset.target).classList.toggle('folded');
-        };
-    });
+    bindSidebarNav();
 
-    document.querySelectorAll('#themeButtons .theme-btn').forEach((btn) => {
+    document.querySelectorAll('#themeButtons .swatch').forEach((btn) => {
         btn.onclick = () => {
-            document.querySelectorAll('#themeButtons .theme-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('#themeButtons .swatch').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             applyBgTheme(btn.dataset.theme);
         };
@@ -515,14 +555,8 @@ function bindAppearance() {
         applyFadeSetting();
     };
 
-    document.querySelectorAll('#anchorButtons .theme-btn').forEach((btn) => {
-        btn.onclick = () => {
-            document.querySelectorAll('#anchorButtons .theme-btn')
-                .forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            setAnchorsVisible(btn.dataset.anchor === 'on');
-        };
-    });
+    const anchorSwitch = document.getElementById('anchorSwitch');
+    anchorSwitch.onchange = () => setAnchorsVisible(anchorSwitch.checked);
 
     // Timbre: the voice is built on first pick, so disable the row until the
     // swap lands - otherwise a fast double-click can leave the wrong button lit.
@@ -536,14 +570,6 @@ function bindAppearance() {
         };
     });
 
-    document.querySelectorAll('#aePanelButtons .theme-btn').forEach((btn) => {
-        btn.onclick = () => {
-            document.querySelectorAll('#aePanelButtons .theme-btn')
-                .forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            setAeVizVisible(btn.dataset.ae === 'on');
-        };
-    });
 }
 
 // (The old hidden circle-of-fifths inset was replaced by the tension radar

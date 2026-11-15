@@ -11,122 +11,113 @@
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <span class="logo">TRACE</span>
-            <button class="icon-btn" id="collapseBtn" title="收起边栏">&#9664;</button>
+            <button class="icon-btn" id="collapseBtn" title="Collapse sidebar">&#9664;</button>
         </div>
 
-        <div class="sidebar-scroll">
-            <!-- Transport -->
-            <div class="section">
-                <div class="section-title">播放 Playback</div>
-                <div class="transport">
-                    <button id="playBtn" title="Play">&#9654;</button>
-                    <button id="pauseBtn" title="Pause">&#10073;&#10073;</button>
-                    <button id="restartBtn" title="Restart">&#8634;</button>
-                </div>
-                <div class="control-group">
-                    <button class="upload-btn" data-pick-midi>&#8682; <span id="uploadLabel">导入 MIDI</span></button>
+        <div class="sidebar-body">
+            <!-- One column: every control on one page. The tabs on the right
+                 edge only navigate (scroll to a group, mark where you are). -->
+            <div class="sidebar-scroll" id="sidebarScroll">
+                <!-- Information -->
+                <div class="section" data-nav="info">
+                    <div class="section-title">File</div>
+                    <button class="upload-btn" data-pick-midi><span id="uploadLabel">Open MIDI…</span><kbd>Ctrl O</kbd></button>
                     <input type="file" id="midiInput" accept=".mid,.midi" hidden>
                     <!-- the two cached projects (js/projects.js) -->
                     <div class="project-chips" id="projectChips" hidden></div>
-                </div>
-                <div class="control-group">
-                    <label class="control-label">音色 Timbre</label>
+                    <button class="upload-btn edit-btn" id="editChordsBtn" title="Correct the recognized chords">
+                        <span>Edit chords…<em id="editedBadge" hidden>edited</em></span><kbd>E</kbd></button>
+                    <label class="control-label">Timbre</label>
                     <div class="theme-row" id="timbreButtons">
-                        <button class="theme-btn active" data-timbre="piano" title="Salamander piano samples">钢琴</button>
-                        <button class="theme-btn" data-timbre="sine" title="Pure sine wave">正弦</button>
-                        <button class="theme-btn" data-timbre="epiano" title="FM electric piano (Rhodes-like)">电钢</button>
-                        <button class="theme-btn" data-timbre="pad" title="Detuned saw pad, lowpassed">铺底</button>
+                        <button class="theme-btn active" data-timbre="piano" title="Salamander piano samples">Piano</button>
+                        <button class="theme-btn" data-timbre="sine" title="Pure sine wave">Sine</button>
+                        <button class="theme-btn" data-timbre="epiano" title="FM electric piano (Rhodes-like)">E.piano</button>
+                        <button class="theme-btn" data-timbre="pad" title="Detuned saw pad, lowpassed">Pad</button>
+                    </div>
+                    <!-- BPM hidden: timing is read from MIDI -->
+                    <div class="control-group" style="display: none;">
+                        <label class="control-label">BPM</label>
+                        <input type="range" id="bpmSlider" min="60" max="200" value="120">
+                        <span id="bpmValue">120</span>
                     </div>
                 </div>
-                <!-- BPM hidden: timing is read from MIDI -->
-                <div class="control-group" style="display: none;">
-                    <label class="control-label">BPM</label>
-                    <input type="range" id="bpmSlider" min="60" max="200" value="120">
-                    <span id="bpmValue">120</span>
-                </div>
-            </div>
 
-            <!-- Key / tonality -->
-            <div class="section" id="keySection" style="display: none;">
-                <div class="section-title">调性 Key</div>
-                <label class="control-label">主调 Main key（自动猜测，可改）</label>
-                <select id="mainKeySelect" class="key-select"></select>
-                <label class="control-label">转调 Modulations</label>
-                <div id="modList"></div>
-                <button class="add-mod-btn" id="addModBtn">+ 在第?小节转为?调</button>
-            </div>
-
-            <!-- Appearance (collapsible, open by default: it is what the sidebar is for now) -->
-            <div class="section collapsible" id="appearanceSection">
-                <div class="section-title toggle" data-target="appearanceSection">
-                    <span>外观 Appearance</span><span class="caret">&#9662;</span>
+                <!-- Key / tonality -->
+                <div class="section" id="keySection" style="display: none;">
+                    <div class="section-title">Key</div>
+                    <label class="control-label">Main key (auto-detected)</label>
+                    <select id="mainKeySelect" class="key-select"></select>
+                    <label class="control-label">Modulations</label>
+                    <div id="modList"></div>
+                    <button class="add-mod-btn" id="addModBtn">+ Add a modulation</button>
                 </div>
-                <div class="section-body">
-                    <label class="control-label">1. 和弦方案 Chord scheme</label>
+
+                <!-- Appearance -->
+                <div class="section" data-nav="appearance">
+                    <div class="section-title">Appearance</div>
+                    <label class="control-label">Chord scheme</label>
                     <div class="theme-row" id="chordModeButtons">
-                        <button class="theme-btn" data-mode="function3">功能三色</button>
-                        <button class="theme-btn active" data-mode="quality4">大小四色</button>
+                        <button class="theme-btn" data-mode="function3">Function (3)</button>
+                        <button class="theme-btn active" data-mode="quality4">Quality (4)</button>
                     </div>
 
-                    <label class="control-label">2. 配色方案 Palette</label>
+                    <label class="control-label">Palette</label>
                     <div class="swatch-row" id="paletteSwatches">
-                        <button class="swatch palette-swatch active" data-palette="vividBright" title="亮·饱和"></button>
-                        <button class="swatch palette-swatch" data-palette="softBright" title="亮·柔和"></button>
-                        <button class="swatch palette-swatch" data-palette="vividDeep" title="暗·饱和"></button>
+                        <button class="swatch palette-swatch active" data-palette="vividBright" title="Bright, saturated"></button>
+                        <button class="swatch palette-swatch" data-palette="softBright" title="Bright, soft"></button>
+                        <button class="swatch palette-swatch" data-palette="vividDeep" title="Deep, saturated"></button>
                     </div>
 
-                    <label class="control-label">背景 Background</label>
-                    <div class="theme-row" id="themeButtons">
-                        <button class="theme-btn active" data-theme="dark">深空</button>
-                        <button class="theme-btn" data-theme="light">纸白</button>
+                    <label class="control-label">Background</label>
+                    <div class="swatch-row" id="themeButtons">
+                        <button class="swatch bg-swatch active" data-theme="dark" title="Deep space"></button>
+                        <button class="swatch bg-swatch" data-theme="light" title="Paper"></button>
                     </div>
 
-                    <label class="control-label">星星密度 Star density
-                        <span class="value-badge" id="densityValue">100%</span>
-                    </label>
-                    <input type="range" id="densitySlider" min="5" max="100" value="100">
+                    <div id="densityControl">
+                        <label class="control-label">Star density
+                            <span class="value-badge" id="densityValue">100%</span>
+                        </label>
+                        <input type="range" id="densitySlider" min="5" max="100" value="100">
+                    </div>
 
-                    <label class="control-label">线条粗细 Line width
+                    <label class="control-label">Line width
                         <span class="value-badge" id="lineWidthValue">1.0x</span>
                     </label>
                     <input type="range" id="lineWidthSlider" min="10" max="100" value="50">
 
-                    <label class="control-label">轨迹淡出 Fade after (bars)
-                        <span class="value-badge" id="fadeValue">16</span>
+                    <label class="control-label">Fade after (bars)
+                        <span class="value-badge" id="fadeValue">8</span>
                     </label>
-                    <input type="range" id="fadeSlider" min="4" max="50" value="16">
+                    <input type="range" id="fadeSlider" min="4" max="50" value="8">
 
-                    <label class="control-label">空间参照 Spatial anchors</label>
-                    <div class="theme-row" id="anchorButtons">
-                        <button class="theme-btn active" data-anchor="on">显示</button>
-                        <button class="theme-btn" data-anchor="off">隐藏</button>
-                    </div>
+                    <label class="control-label switch-row">Spatial anchors
+                        <span class="switch">
+                            <input type="checkbox" id="anchorSwitch" checked>
+                            <span class="switch-track"></span>
+                        </span>
+                    </label>
+                </div>
 
-                    <label class="control-label">自编码器面板 Autoencoder panel</label>
-                    <div class="theme-row" id="aePanelButtons">
-                        <button class="theme-btn active" data-ae="on">显示</button>
-                        <button class="theme-btn" data-ae="off">隐藏</button>
-                    </div>
+                <!-- More -->
+                <div class="section" data-nav="more">
+                    <div class="section-title">More</div>
+                    <button class="upload-btn export-btn" id="exportBtn">Export video</button>
                 </div>
             </div>
 
-            <!-- Future features (collapsible) -->
-            <div class="section section-future collapsible folded" id="moreSection">
-                <div class="section-title toggle" data-target="moreSection">
-                    <span>更多 More</span><span class="caret">&#9662;</span>
-                </div>
-                <div class="section-body">
-                    <button class="theme-btn export-btn" id="exportBtn">导出视频</button>
-                    <div class="future-item">和声分析 <span class="soon">soon</span></div>
-                    <div class="future-item">多轨可视化 <span class="soon">soon</span></div>
-                </div>
+            <!-- Vertical tabs on the sidebar's right edge: navigation only -->
+            <div class="sidebar-tabs" id="sidebarTabs">
+                <button class="sidebar-tab active" data-nav="info">Information</button>
+                <button class="sidebar-tab" data-nav="appearance">Appearance</button>
+                <button class="sidebar-tab" data-nav="more">More</button>
             </div>
         </div>
 
         <div class="resize-handle" id="resizeHandle"></div>
     </div>
 
-    <button class="icon-btn expand-btn" id="expandBtn" title="展开边栏" hidden>&#9654;</button>
+    <button class="icon-btn expand-btn" id="expandBtn" title="Expand sidebar" hidden>&#9654;</button>
 
     <div id="canvas">
         <!-- Heads-up anchors: landmark labels, off-screen chevrons, boundary ticks -->
@@ -135,64 +126,118 @@
         <!-- Start prompt: shown until a MIDI is open (js/projects.js) -->
         <div class="start-prompt" id="startPrompt">
             <div class="start-card">
-                <div class="start-icon">&#9835;</div>
-                <div class="start-title">导入一首 MIDI 开始</div>
-                <div class="start-sub">把 .mid 文件拖到这里，或者</div>
-                <button class="start-btn" data-pick-midi>选择 MIDI 文件</button>
+                <div class="start-mark">TRACE</div>
+                <p class="start-lede">Follow a chord progression through a learned space of harmonic tension.</p>
+                <div class="start-actions">
+                    <button class="start-btn" data-pick-midi>Open MIDI file <kbd>Ctrl O</kbd></button>
+                    <span class="start-hint">or drop a .mid file anywhere</span>
+                </div>
                 <div class="start-recent-wrap" hidden>
-                    <div class="start-sub">最近的工程</div>
+                    <div class="start-label">Recent</div>
                     <div class="start-recent" id="startRecent"></div>
                 </div>
             </div>
         </div>
 
-        <!-- Experimental view layouts (js/views.js) -->
-        <div class="view-bar" id="viewBar">
-            <button data-view="original" class="active" title="原来的视图：跟随和弦飞行">原始</button>
-            <button data-view="bowl" title="学到的空间：以 I 为中心摆正，不做变形">张力碗</button>
-            <button data-view="well" title="规整化：五度圈均匀分布，离 I 的距离保持真实">引力井</button>
-            <button data-view="tunnel" title="引力井的截面沿时间展开">隧道</button>
-            <label class="view-morph" id="viewMorphWrap" hidden>学到的
-                <input type="range" id="viewMorph" min="0" max="100" value="0">规整</label>
-            <button id="viewTop" hidden title="俯视：引力井从上往下看就是 2D 靶盘">俯视</button>
+        <!-- Control strip (bottom, full width): transport + timeline and the
+             view switcher in one instrument bar -->
+        <div class="control-strip">
+            <!-- Transport: play controls, where the piece is, and the timeline
+                 (js/timeline.js: click or drag to seek) -->
+            <div class="transport-bar" id="transportBar">
+                <button id="playBtn" title="Play (Space)">&#9654;</button>
+                <button id="pauseBtn" title="Pause (Space)">&#10073;&#10073;</button>
+                <button id="restartBtn" title="Restart">&#8634;</button>
+                <span class="tp-where" id="mvWhere"></span>
+                <div class="timeline-wrap">
+                    <canvas id="timeline" class="timeline" title=""></canvas>
+                    <span class="timeline-tip" id="timelineTip" hidden></span>
+                </div>
+            </div>
+
+            <!-- Experimental view layouts (js/views.js) -->
+            <div class="view-bar" id="viewBar">
+                <button data-view="original" class="active" title="The original view: the camera flies with the chords">Original</button>
+                <button data-view="bowl" title="The learned space, centred on I and levelled, not deformed">Bowl</button>
+                <button data-view="well" title="Idealised: even circle of fifths, true distance from I">Well</button>
+                <button data-view="tunnel" title="The well's cross-section swept along time">Tunnel</button>
+                <label class="view-morph" id="viewMorphWrap" hidden>learned
+                    <input type="range" id="viewMorph" min="0" max="100" value="0">ideal</label>
+                <button id="viewTop" hidden title="Top view: the well seen from above is the 2D target">Top</button>
+            </div>
         </div>
 
-        <!-- The move just made: which chord to which, what TPS says it costs
-             (delta = i + j + k), how each chord tone travelled, and where the
-             piece stands relative to home. Recent moves stack underneath and
-             fade out. Hidden until a MIDI is loaded. -->
-        <div class="move-panel" id="movePanel" hidden>
-            <div class="mv-head">
-                <span class="mv-title">MOVE</span>
-                <span class="mv-where" id="mvWhere"></span>
-            </div>
-            <div class="mv-chords">
-                <span class="mv-chord mv-from" id="mvFrom"><i class="mv-dot"></i><b></b></span>
-                <span class="mv-arrow">&rarr;</span>
-                <span class="mv-chord mv-to" id="mvTo"><i class="mv-dot"></i><b></b></span>
-            </div>
+        <!-- Info dock (top-left): the move just made, and how the autoencoder
+             computes the current chord's coordinate. Hidden until a MIDI is open. -->
+        <div class="info-dock" id="infoDock" hidden>
+            <!-- The move just made: which chord to which, what TPS says it costs
+                 (delta = i + j + k), how each chord tone travelled, and where the
+                 piece stands relative to home. Recent moves stack underneath and
+                 fade out. Hidden until a MIDI is loaded. -->
+            <div class="move-panel" id="movePanel">
+                <div class="mv-head">
+                    <span class="mv-title">Now</span>
+                    <button class="mv-min" id="mvMin" title="Minimise">&ndash;</button>
+                </div>
+                <!-- the current chord as the panel's one large readout -->
+                <div class="mv-chords">
+                    <span class="mv-chord mv-to" id="mvTo"><i class="mv-dot"></i><b></b></span>
+                    <span class="mv-roman" id="mvRoman"></span>
+                    <span class="mv-chord mv-from" id="mvFrom"><span class="mv-from-lab">from</span><i class="mv-dot"></i><b></b></span>
+                </div>
 
-            <div class="mv-eq" id="mvEq">
-                <span class="mv-term mv-d"><em>&delta;</em><b id="mvDelta"></b></span>
-                <span class="mv-op">=</span>
-                <span class="mv-term t-i"><em>i</em><b id="mvI"></b><small>key</small></span>
-                <span class="mv-op">+</span>
-                <span class="mv-term t-j"><em>j</em><b id="mvJ"></b><small>root 5ths</small></span>
-                <span class="mv-op">+</span>
-                <span class="mv-term t-k"><em>k</em><b id="mvK"></b><small>tones</small></span>
+                <div class="mv-eq" id="mvEq">
+                    <span class="mv-term mv-d"><em>&delta;</em><b id="mvDelta"></b></span>
+                    <span class="mv-op">=</span>
+                    <span class="mv-term t-i"><em>i</em><b id="mvI"></b><small>key</small></span>
+                    <span class="mv-op">+</span>
+                    <span class="mv-term t-j"><em>j</em><b id="mvJ"></b><small>root 5ths</small></span>
+                    <span class="mv-op">+</span>
+                    <span class="mv-term t-k"><em>k</em><b id="mvK"></b><small>tones</small></span>
+                </div>
+                <div class="mv-stack" id="mvStack">
+                    <span class="t-i"></span><span class="t-j"></span><span class="t-k"></span>
+                </div>
+                <div class="mv-model">&Vert;&Delta;z&Vert; model <b id="mvDz"></b></div>
+
+                <div class="mv-sub">chord tones <span id="mvVoiceNote"></span></div>
+                <canvas class="mv-canvas" id="mvVoices"></canvas>
+
+                <div class="mv-sub">from I <span id="mvHome"></span></div>
+                <canvas class="mv-canvas mv-arc" id="mvArc" title="Click to jump to a chord"></canvas>
+
+                <div class="mv-history" id="mvHistory"></div>
             </div>
-            <div class="mv-stack" id="mvStack">
-                <span class="t-i"></span><span class="t-j"></span><span class="t-k"></span>
+            <!-- Autoencoder panel: how the current chord's 3D coordinate is computed -->
+            <div class="ae-panel" id="aePanel">
+                <canvas id="aeCanvas"></canvas>
             </div>
-            <div class="mv-model">&Vert;&Delta;z&Vert; model <b id="mvDz"></b></div>
+        </div>
+    </div>
 
-            <div class="mv-sub">chord tones <span id="mvVoiceNote"></span></div>
-            <canvas class="mv-canvas" id="mvVoices"></canvas>
-
-            <div class="mv-sub">from I <span id="mvHome"></span></div>
-            <canvas class="mv-canvas mv-arc" id="mvArc" title="Click to jump to a chord"></canvas>
-
-            <div class="mv-history" id="mvHistory"></div>
+    <!-- Chord editor (js/editor.js): the whole progression on a bar grid -->
+    <div class="chord-editor" id="chordEditor" hidden>
+        <div class="ce-head">
+            <span class="ce-title">Edit chords</span>
+            <span class="ce-file" id="ceFile"></span>
+            <span class="ce-count" id="ceCount"></span>
+            <span class="ce-spacer"></span>
+            <button class="ce-btn" id="ceUndo" title="Undo (Ctrl Z)">Undo</button>
+            <button class="ce-btn" id="ceRevert" title="Throw away every edit and go back to the recognizer's chords">Revert to recognized</button>
+            <button class="ce-btn" id="ceCancel" title="Close without applying (Esc)">Cancel</button>
+            <button class="ce-btn primary" id="ceApply" title="Apply (Ctrl Enter)">Apply</button>
+        </div>
+        <div class="ce-grid" id="ceGrid"></div>
+        <div class="ce-inspector" id="ceInspector">
+            <div class="ce-fields">
+                <label class="ce-field ce-name">Chord<input id="ceName" spellcheck="false" autocomplete="off" placeholder="e.g. Am7, G7(b9), C/E"></label>
+                <label class="ce-field ce-num">Bar<input id="ceBar" type="number" min="1" step="1"></label>
+                <label class="ce-field ce-num">Beat<input id="ceBeat" type="number" min="1" step="0.5"></label>
+                <button class="ce-btn" id="ceDelete" title="Delete this chord (Del)">Delete</button>
+                <div class="ce-readout"><span id="cePreview"></span><span class="ce-error" id="ceError" hidden></span></div>
+            </div>
+            <div class="ce-help">Click a chord to edit it · double-click a beat to add one · ←/→ select · Enter edit · Del delete · Ctrl Z undo</div>
+            <div class="ce-status" id="ceStatus"></div>
         </div>
     </div>
 
@@ -200,10 +245,6 @@
         <canvas id="circleCanvas" width="200" height="200"></canvas>
     </div>
 
-    <!-- Autoencoder panel: how the current chord's 3D coordinate is computed -->
-    <div class="ae-panel" id="aePanel">
-        <canvas id="aeCanvas"></canvas>
-    </div>
 
     <!-- Vendored libraries (offline-capable) -->
     <script src="vendor/three.min.js"></script>
@@ -223,6 +264,7 @@
     <script src="js/cosmos.js"></script>
     <script src="js/particles.js"></script>
     <script src="js/analysis.js"></script>
+    <script src="js/chordname.js"></script>
     <script src="js/chords.js"></script>
     <script src="js/landmarks.js"></script>
     <script src="js/views.js"></script>
@@ -232,6 +274,8 @@
     <script src="js/radar.js"></script>
     <script src="js/aeviz.js"></script>
     <script src="js/export.js"></script>
+    <script src="js/timeline.js"></script>
+    <script src="js/editor.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

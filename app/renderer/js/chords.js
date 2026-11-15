@@ -236,9 +236,10 @@ function rebuildProgressionFromAnalysis() {
             tensions: seg.tensions || [],
             pcs: seg.pcs,
             soundingPcs: seg.soundingPcs || seg.pcs,
-            // 3D sprite label: core quality only, tensions would not fit
-            label: romanLabel(adjusted, key, false),
-            // sidebar: the full reading, tension figures included
+            // Full reading everywhere (3D sprite, radar, AE header), tension
+            // figures included: vi(9) is not vi, and its embedding is not
+            // either - a bare "vi" made it look misplaced next to the vi landmark.
+            label: romanLabel(adjusted, key, true),
             labelFull: romanLabel(adjusted, key, true),
             absLabel: getChordLabel(adjusted),
             coords: lookupEmbedding(seg.root, seg.bass, seg.pcs, seg.bar),
@@ -484,7 +485,6 @@ function applyVisualTheme() {
     if (cometHead) styleCometMaterial(cometHead.material);
     if (cometTail) styleCometMaterial(cometTail.material);
     activeChordLabels.forEach(refreshLabelTexture);
-    viewRing.forEach(refreshLabelTexture);
     styleViewGuides();
     const pointsBlending = isLightBg() ? THREE.NormalBlending : THREE.AdditiveBlending;
     activeChordClouds.forEach((cloud) => {

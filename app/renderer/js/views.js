@@ -29,11 +29,10 @@ let viewMode = 'original';
 let viewMorph = 0;
 let viewFrame = null;          // the learned frame around I, see computeViewFrame
 let viewGuides = null;         // { bowl, well, tunnel } line groups
-let viewRing = [];             // 12 note sprites, index = pitch class in the C frame
 
 const VIEW_UNIT = 0.5;
 const VIEW_CONE = THREE.MathUtils.degToRad(29);
-const VIEW_RING_R = 11;                    // latent units: outside nearly every common chord
+const VIEW_RING_R = 11;                    // latent units: reach of the C-direction arrow
 const VIEW_SHELLS = [3, 6, 9];             // latent units from I
 const VIEW_FRONT_DEG = -90;                // C's direction in the plane: -z, straight ahead
 const TUNNEL_BEAT = 0.35;                  // display units per beat along the time axis
@@ -241,8 +240,10 @@ function buildViewGuides() {
             tunnel.add(ring);
         });
     }
-    // C's direction, drawn in the plane through I: a ray out to the note ring
-    // with an arrowhead, so "which way is C" is readable in either space view.
+    // C's direction, drawn in the plane through I: a ray with an arrowhead and
+    // a single "C" label, so "which way is C" is readable in either space view.
+    // (The per-note ring that used to sit around the space is gone: twelve
+    // labels lighting up with every chord was the busiest thing on screen.)
     const front = new THREE.Group();
     const reach = VIEW_RING_R * U;
     front.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(
@@ -252,6 +253,9 @@ function buildViewGuides() {
     head.rotation.x = -Math.PI / 2;           // cone tip from +y to -z
     head.position.set(0, 0, -reach - 0.14);
     front.add(head);
+    const cLabel = makeLabelSprite('C', true);
+    cLabel.position.set(0, 0.22, -reach - 0.45);
+    front.add(cLabel);
     viewGuides = { bowl, well, tunnel, front };
     Object.values(viewGuides).forEach(g => scene.add(g));
     styleViewGuides();
@@ -272,70 +276,13 @@ function styleViewGuides() {
     viewGuides.well.visible = space && viewMorph > 0.02;
     viewGuides.tunnel.visible = viewMode === 'tunnel' && !!viewFrame;
     viewGuides.front.visible = space;
+    refreshLabelTexture(viewGuides.front.children[2]);      // theme-dependent ink
     viewGuides.front.children[0].material.color.copy(sceneColor(0x7d96e8));
     set(viewGuides.bowl, 1 - viewMorph);
     set(viewGuides.well, viewMorph);
     set(viewGuides.tunnel, 1);
 }
 
-// ---- Note ring: the 12 pitch classes, lit while they sound ----
-// Recognition-free: it reads the MIDI notes sounding right now, not the chord
-// labels. Placed on the learned directions (space at 0), the even fifths
-// circle (space at 1, tunnel) or anywhere in between.
-function buildViewRing() {
-    viewRing.forEach(s => { scene.remove(s); s.material.map.dispose(); s.material.dispose(); });
-    viewRing = [];
-    for (let k = 0; k < 12; k++) {
-        const sprite = makeLabelSprite('', false);
-        sprite.userData.framePc = k;
-        sprite.renderOrder = 11;
-        scene.add(sprite);
-        viewRing.push(sprite);
-    }
-}
-function soundingPitchClasses() {
-    const set = new Set();
-    if (!midiSpansSec.length) return set;
-    let t = null;
-    if (isPlaying && midiStartTime) t = (Date.now() - midiStartTime) / 1000;
-    if (t === null) {
-        const c = progression[currentIndex];
-        (c && c.soundingPcs || []).forEach(pc => set.add(pc));
-        return set;
-    }
-    for (const n of midiSpansSec) {
-        if (n.startSec > t) break;
-        if (n.endSec + 0.12 > t) set.add(n.pitch % 12);   // short afterglow
-    }
-    return set;
-}
-function updateViewRing() {
-    const on = viewActive() && progression.length > 0;
-    viewRing.forEach(s => { s.visible = on; });
-    if (!on) return;
-    const cur = progression[currentIndex];
-    const shift = transposeShiftForKey(keyAtBar(cur.bar));
-    const sounding = new Set([...soundingPitchClasses()].map(pc => (pc + shift) % 12));
-    const R = VIEW_RING_R * VIEW_UNIT;
-    const z = viewMode === 'tunnel' ? -playheadBeat() * TUNNEL_BEAT : 0;
-    viewRing.forEach((s) => {
-        const k = s.userData.framePc;
-        const name = PITCH_NAMES[(k - shift + 12) % 12];
-        if (s.userData.labelText !== name) { s.userData.labelText = name; refreshLabelTexture(s); }
-        const th = idealAngle(k, 'dom');
-        if (viewMode === 'tunnel') {
-            s.position.set(R * Math.cos(th), -R * Math.sin(th), z);
-        } else {
-            const ideal = new THREE.Vector3(R * Math.cos(VIEW_CONE) * Math.cos(th), R * Math.sin(VIEW_CONE), R * Math.cos(VIEW_CONE) * Math.sin(th));
-            s.position.copy(viewFrame.learnedDir[k].clone().multiplyScalar(R)).lerp(ideal, viewMorph);
-        }
-        const lit = sounding.has(k);
-        const h = LABEL_HEIGHT * (lit ? 1.5 : 0.9);
-        s.userData.height = h;
-        s.scale.set(h * s.userData.aspect, h, 1);
-        s.material.opacity = lit ? 1 : 0.28;
-    });
-}
 
 // ---- Landmarks follow the view (hidden in the tunnel: they have no time) ----
 function repositionLandmarks() {
@@ -429,7 +376,6 @@ function initViews() {
     viewFrame = computeViewFrame();
     if (!viewFrame) { console.warn('views: embedding table missing the I chord'); return; }
     buildViewGuides();
-    buildViewRing();
     applyViewVisibility();
     bindViewBar();
     syncViewBar();
@@ -455,6 +401,5 @@ function updateTunnelWalls() {
 }
 
 function updateViews() {
-    updateViewRing();
     updateTunnelWalls();
 }

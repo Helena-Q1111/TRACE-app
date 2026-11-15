@@ -48,19 +48,41 @@ let chordPaletteKey = 'vividBright';
 
 const CHORD_PALETTES = {
     vividBright: {  // 高明度高饱和
-        name: '亮·饱和',
+        name: 'Bright, saturated',
         function3: { T: 0x3d9bff, S: 0x3ddc70, D: 0xff4d5e },
         quality4:  { major: 0x3d9bff, minor: 0xff4d5e, dominant: 0xffb300, altered: 0xb44dff }
     },
     softBright: {   // 高明度低饱和
-        name: '亮·柔和',
+        name: 'Bright, soft',
         function3: { T: 0xa8c8ee, S: 0xaeddb6, D: 0xeeaab2 },
         quality4:  { major: 0xa8c8ee, minor: 0xeeaab2, dominant: 0xeed6a0, altered: 0xcfb2e6 }
     },
     vividDeep: {    // 低明度高饱和
-        name: '暗·饱和',
+        name: 'Deep, saturated',
         function3: { T: 0x1c55a8, S: 0x1f7d3d, D: 0xa02338 },
         quality4:  { major: 0x1c55a8, minor: 0xa02338, dominant: 0xa87310, altered: 0x6c2fa8 }
+    }
+};
+
+// The same three palettes on the light ("Paper") background. Darkening the
+// dark-background colours left them muddy and over-saturated there, so these
+// come from Tableau 10 (Stone & Maureen, 2016), a categorical set designed for
+// white grounds: mid lightness, restrained saturation, distinct hue names.
+//   vividBright -> Tableau 10 itself
+//   softBright  -> its light companions (Tableau 20, even entries)
+//   vividDeep   -> Tableau 10 at ~80% lightness, for a heavier line
+const CHORD_PALETTES_LIGHT = {
+    vividBright: {
+        function3: { T: 0x4e79a7, S: 0x59a14f, D: 0xe15759 },
+        quality4:  { major: 0x4e79a7, minor: 0xe15759, dominant: 0xf28e2b, altered: 0xb07aa1 }
+    },
+    softBright: {
+        function3: { T: 0xa0cbe8, S: 0x8cd17d, D: 0xff9d9a },
+        quality4:  { major: 0xa0cbe8, minor: 0xff9d9a, dominant: 0xffbe7d, altered: 0xd4a6c8 }
+    },
+    vividDeep: {
+        function3: { T: 0x3e6186, S: 0x47813f, D: 0xb44647 },
+        quality4:  { major: 0x3e6186, minor: 0xb44647, dominant: 0xc27222, altered: 0x8d6281 }
     }
 };
 
@@ -265,19 +287,19 @@ function chordFunction(root, quality, bar) {
 }
 
 // Main lookup: chord {root, quality} -> hex color under current mode+palette
+// (and background: the light theme has its own table)
 function getChordColor(chord) {
-    const palette = CHORD_PALETTES[chordPaletteKey];
+    const palette = (bgThemeKey === 'light' ? CHORD_PALETTES_LIGHT : CHORD_PALETTES)[chordPaletteKey];
     if (chordColorMode === 'function3') {
         return palette.function3[chordFunction(chord.root, chord.quality, chord.bar)];
     }
     return palette.quality4[QUALITY_GROUP[chord.quality] || 'major'];
 }
 
-// Theme-aware variant: darker spheres on the white background
+// Kept as the one entry point for themed colours; the light palette table
+// already carries the theme, so nothing is scaled here any more.
 function getThemedChordColor(chord) {
-    const c = new THREE.Color(getChordColor(chord));
-    if (bgThemeKey === 'light') c.multiplyScalar(0.62);
-    return c;
+    return new THREE.Color(getChordColor(chord));
 }
 
 // ---- Colour management ----
@@ -299,9 +321,9 @@ function getChordColorHexStr(chord) {
 
 // ---- Comet / path color schemes ----
 const COMET_SCHEMES = {
-    ice:    { name: '星蓝', comet: 0xbcd0f5, flow: 0x9db4e8, swatch: '#9db4e8' },
-    solar:  { name: '金橙', comet: 0xf5d7a8, flow: 0xe8bc7d, swatch: '#e8bc7d' },
-    violet: { name: '紫辉', comet: 0xdcc2f0, flow: 0xc39ce8, swatch: '#c39ce8' }
+    ice:    { name: 'Ice', comet: 0xbcd0f5, flow: 0x9db4e8, swatch: '#9db4e8' },
+    solar:  { name: 'Solar', comet: 0xf5d7a8, flow: 0xe8bc7d, swatch: '#e8bc7d' },
+    violet: { name: 'Violet', comet: 0xdcc2f0, flow: 0xc39ce8, swatch: '#c39ce8' }
 };
 let cometSchemeKey = 'ice';
 function getCometScheme() { return COMET_SCHEMES[cometSchemeKey]; }
@@ -309,11 +331,12 @@ function getCometScheme() { return COMET_SCHEMES[cometSchemeKey]; }
 // ---- Background themes (canvas + background particles) ----
 const BG_THEMES = {
     dark: {
-        name: '深空',
+        name: 'Deep space',
         // The colour as displayed (sRGB); sceneColor() converts it. Kept equal
         // to what the old pipeline actually showed, so the sky did not change
         // when the double tone mapping was removed (see scene.js).
         bg: 0x0c0c21,
+        starsVisible: true,
         starAdditive: true,
         starPalette: 'bright',     // white / ice-blue / warm tints
         starOpacityScale: 1.0,
@@ -323,8 +346,9 @@ const BG_THEMES = {
         bloomStrength: 0.85
     },
     light: {
-        name: '纸白',
-        bg: 0xe2e2e3,              // slightly gray so particles read against it (displayed sRGB)
+        name: 'Paper',
+        bg: 0xe7e5df,              // warm grey paper: dark enough that particles read against it (displayed sRGB)
+        starsVisible: false,       // dark dots on paper read as dust, not sky
         starAdditive: false,       // additive is invisible on white
         starPalette: 'dark',       // dark gray-blue dots
         starOpacityScale: 1.0,
@@ -415,7 +439,7 @@ function isOffKey(pcs, bar) {
 // FADE_OFF (slider max) disables fading entirely.
 const FADE_OFF = 50;
 const FADE_SPAN_BARS = 4;   // fade completes over this many additional bars
-let fadeBars = 16;
+let fadeBars = 8;
 
 // ---- Playback timing (read from MIDI / progression metadata) ----
 // MIDI spec defaults, used only when no source provides timing:
@@ -461,9 +485,10 @@ const RENDER_CFG = {
     // floating inside the arena. Sizes grew with the radii to keep the stars
     // the same apparent size.
     starLayers: [
-        { count: 1600, size: 0.20, rMin: 100, rMax: 260, opacity: 0.85, twinkleSpeed: 0.9 },
-        { count: 700,  size: 0.40, rMin: 95,  rMax: 220, opacity: 0.65, twinkleSpeed: 1.6 },
-        { count: 220,  size: 0.75, rMin: 92,  rMax: 175, opacity: 0.5,  twinkleSpeed: 2.4 }
+        // (counts halved from 1600/700/220: the full field was too busy)
+        { count: 800,  size: 0.65, rMin: 100, rMax: 260, opacity: 0.85, twinkleSpeed: 0.9 },
+        { count: 350,  size: 1.20, rMin: 95,  rMax: 220, opacity: 0.70, twinkleSpeed: 1.6 },
+        { count: 110,  size: 2.10, rMin: 92,  rMax: 175, opacity: 0.60, twinkleSpeed: 2.4 }
     ],
     nebulaCount: 6,
     nebulaColors: [0x3a2a7a, 0x1a3a7a, 0x0a4a5a, 0x4a1a4a, 0x24245e],

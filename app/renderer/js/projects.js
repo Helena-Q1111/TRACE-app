@@ -45,7 +45,10 @@ function persistActiveProject() {
     p.key = { tonic: keySignature.tonic, mode: keySignature.mode };
     p.mods = keyModulations.map(m => ({ bar: m.bar, tonic: m.tonic, mode: m.mode }));
     p.lastIndex = currentIndex;
+    // user-corrected chords (js/editor.js) replace recognition for this piece
+    p.chords = chordsEdited ? analysisSegments.map(s => ({ ...s })) : null;
     saveProjectStore();
+    syncEditedBadge();
 }
 
 // New file -> new project in the front slot; the least recently opened one
@@ -53,8 +56,16 @@ function persistActiveProject() {
 async function openMidiFile(file) {
     if (!file || isExporting) return;
     const buf = await file.arrayBuffer();
-    const project = { id: `p${Date.now()}`, name: file.name, data: null, key: null, mods: [], lastIndex: 0, openedAt: Date.now() };
-    if (buf.byteLength <= PROJECT_MAX_BYTES) project.data = bufToB64(buf);
+    // The same file again (byte for byte) reopens its project - key decisions
+    // and position included - instead of filling the second slot with a twin.
+    const b64 = buf.byteLength <= PROJECT_MAX_BYTES ? bufToB64(buf) : null;
+    const twin = b64 && projects.find(p => p.data === b64);
+    if (twin) {
+        if (twin.id !== activeProjectId) await openProject(twin.id);
+        return;
+    }
+    const project = { id: `p${Date.now()}`, name: file.name, data: null, key: null, mods: [], lastIndex: 0, chords: null, openedAt: Date.now() };
+    project.data = b64;
     persistActiveProject();
     projects = [project, ...projects].slice(0, PROJECT_SLOTS);
     saveProjectStore();
@@ -89,8 +100,13 @@ async function showProject(p, buf) {
     restoringProject = true;
     try {
         analyzeAndBuildProgression();   // recognition + key guess
-        if (p.key) {                    // ...then the key this project was left in
-            keySignature = { ...p.key };
+        chordsEdited = false;
+        if (Array.isArray(p.chords) && p.chords.length) {   // ...or the chords corrected by hand
+            analysisSegments = p.chords.map(s => ({ ...s }));
+            chordsEdited = true;
+        }
+        if (p.key || chordsEdited) {    // ...then the key this project was left in
+            if (p.key) keySignature = { ...p.key };
             keyModulations = (p.mods || []).map(m => ({ ...m }));
             estimatedTonic = keySignature.tonic;
             syncKeyUI();
@@ -108,10 +124,22 @@ async function showProject(p, buf) {
 }
 
 // ---- UI: the start prompt, the sidebar project chips, drag and drop ----
+function timeAgo(t) {
+    if (!t) return '';
+    const m = Math.round((Date.now() - t) / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m} min ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h} h ago`;
+    const d = Math.round(h / 24);
+    return d === 1 ? 'yesterday' : `${d} days ago`;
+}
+
 function renderProjectUI() {
     const hasActive = !!activeProjectId;
     const prompt = document.getElementById('startPrompt');
     if (prompt) prompt.hidden = hasActive;
+    document.body.classList.toggle('has-project', hasActive);
 
     const recent = document.getElementById('startRecent');
     if (recent) {
@@ -119,8 +147,14 @@ function renderProjectUI() {
         projects.filter(p => p.data).forEach((p) => {
             const b = document.createElement('button');
             b.className = 'start-recent-btn';
-            b.textContent = p.name;
-            b.title = '打开这个工程';
+            b.title = 'Open this project';
+            const nm = document.createElement('span');
+            nm.className = 'nm';
+            nm.textContent = p.name;
+            const when = document.createElement('span');
+            when.className = 'when';
+            when.textContent = timeAgo(p.openedAt);
+            b.append(nm, when);
             b.onclick = () => openProject(p.id);
             recent.appendChild(b);
         });
@@ -133,7 +167,7 @@ function renderProjectUI() {
         projects.forEach((p) => {
             const chip = document.createElement('div');
             chip.className = 'project-chip' + (p.id === activeProjectId ? ' active' : '');
-            chip.title = p.data ? p.name : `${p.name}（文件过大，未缓存）`;
+            chip.title = p.data ? p.name : `${p.name} (too large to cache)`;
             const name = document.createElement('span');
             name.className = 'project-name';
             name.textContent = p.name;
@@ -142,7 +176,7 @@ function renderProjectUI() {
                 chip.onclick = () => openProject(p.id);
                 const x = document.createElement('button');
                 x.className = 'project-close';
-                x.title = '从缓存移除';
+                x.title = 'Remove from the cache';
                 x.textContent = '×';
                 x.onclick = (e) => { e.stopPropagation(); closeProject(p.id); };
                 chip.appendChild(x);
@@ -152,7 +186,7 @@ function renderProjectUI() {
         chips.hidden = projects.length === 0;
     }
     const uploadLabel = document.getElementById('uploadLabel');
-    if (uploadLabel) uploadLabel.textContent = hasActive ? '上传新 MIDI' : '导入 MIDI';
+    if (uploadLabel) uploadLabel.textContent = hasActive ? 'Open another MIDI…' : 'Open MIDI…';
 }
 
 function bindProjects() {
@@ -168,15 +202,23 @@ function bindProjects() {
     // Drop a MIDI anywhere on the scene. Electron would otherwise navigate to
     // the dropped file, so the window swallows drops that miss the scene.
     const host = document.getElementById('canvas');
-    const prompt = document.getElementById('startPrompt');
     ['dragover', 'drop'].forEach(t => window.addEventListener(t, e => e.preventDefault()));
-    host.addEventListener('dragover', (e) => { e.preventDefault(); if (prompt) prompt.classList.add('dragging'); });
-    host.addEventListener('dragleave', () => { if (prompt) prompt.classList.remove('dragging'); });
+    host.addEventListener('dragover', (e) => { e.preventDefault(); host.classList.add('dragging'); });
+    host.addEventListener('dragleave', (e) => {
+        if (!host.contains(e.relatedTarget)) host.classList.remove('dragging');
+    });
     host.addEventListener('drop', async (e) => {
         e.preventDefault();
-        if (prompt) prompt.classList.remove('dragging');
+        host.classList.remove('dragging');
         const file = [...(e.dataTransfer.files || [])].find(f => /\.midi?$/i.test(f.name));
         if (file) await openMidiFile(file);
+    });
+    // Ctrl/Cmd+O opens the file picker, as the start screen advertises
+    window.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'o') {
+            e.preventDefault();
+            input.click();
+        }
     });
     window.addEventListener('beforeunload', persistActiveProject);
     renderProjectUI();

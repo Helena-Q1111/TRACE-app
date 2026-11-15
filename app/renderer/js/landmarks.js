@@ -239,14 +239,16 @@ function styleLandmarks() {
         // On paper-white there is no glow, and a translucent dot just turns
         // pale - so weight is carried almost entirely by size there, and
         // opacity stays near solid.
-        n.mesh.material.opacity = isHome ? 0.95
+        n.baseOpacity = isHome ? 0.95
             : light ? 0.78 + 0.22 * n.weight : 0.45 + 0.40 * n.weight;
+        n.mesh.material.opacity = n.baseOpacity * (n.reveal ?? 1);
         // Additive glow does nothing on white, and the falloff texture under
         // normal blending only lands ~5% ink - not worth the draw. On paper the
         // HUD's marker dot is what makes a landmark findable instead.
         n.glow.visible = !light;
         n.glow.material.color.copy(n.sceneColor);
-        n.glow.material.opacity = isHome ? 0.55 : 0.10 + 0.20 * n.weight;
+        n.baseGlow = isHome ? 0.55 : 0.10 + 0.20 * n.weight;
+        n.glow.material.opacity = n.baseGlow * (n.reveal ?? 1);
     });
     if (tonicStars) {
         const tonic = landmarkNodes.find(n => n.degree === 'I');
@@ -320,7 +322,46 @@ function projectPoint(v, w, h) {
     };
 }
 
+// ---- Landmarks appear as the music reaches them ----
+// All seven at once read as chords waiting to be connected before the piece
+// had played them. Home (I) is always there; every other degree fades in the
+// first time a chord on that degree sounds (by C-frame root and quality
+// family, so V7 or V/inversion counts for V), and stays.
+const LANDMARK_FADE_MS = 500;
+let landmarkRevealKey = '';
+function landmarkFamily(q) {
+    const g = QUALITY_GROUP[q] || 'major';
+    return g === 'dominant' ? 'major' : g === 'altered' ? (q === 'aug' ? 'aug' : 'dim') : g;
+}
+function updateLandmarkReveal() {
+    const key = progression.length ? `${progression.length}:${progression[0].coords}:${currentIndex}` : '';
+    if (key !== landmarkRevealKey) {
+        landmarkRevealKey = key;
+        const reached = new Set(['0:major']);
+        for (let i = 0; i <= currentIndex && i < progression.length; i++) {
+            const c = progression[i];
+            reached.add(`${chordFramePc(c)}:${landmarkFamily(c.quality)}`);
+        }
+        const now = performance.now();
+        landmarkNodes.forEach((n) => {
+            const on = reached.has(`${n.root}:${n.quality}`);
+            if (on && !n.reachedAt) n.reachedAt = now;
+            if (!on) n.reachedAt = 0;
+        });
+    }
+    const now = performance.now();
+    landmarkNodes.forEach((n) => {
+        const r = n.reachedAt ? Math.min(1, (now - n.reachedAt) / LANDMARK_FADE_MS) : 0;
+        if (r === n.reveal) return;
+        n.reveal = r;
+        n.mesh.visible = r > 0;
+        n.mesh.material.opacity = (n.baseOpacity ?? 1) * r;
+        n.glow.material.opacity = (n.baseGlow ?? 0) * r;
+    });
+}
+
 function updateLandmarks(t) {
+    updateLandmarkReveal();
     if (tonicStars) {
         tonicStars.rotation.y = t * 0.12;
         tonicStars.rotation.x = Math.sin(t * 0.07) * 0.35;
@@ -350,7 +391,7 @@ function panelRects(w, h) {
     if (!host) return [];
     const base = host.getBoundingClientRect();
     const out = [];
-    ['circleCanvas', 'aeCanvas', 'movePanel', 'viewBar'].forEach((id) => {
+    ['circleCanvas', 'infoDock', 'viewBar'].forEach((id) => {
         const el = document.getElementById(id);
         if (!el || el.offsetParent === null) return;
         const r = el.getBoundingClientRect();
@@ -413,8 +454,9 @@ function drawAnchorHud() {
 
     // --- landmarks: on-screen label, or an edge chevron pointing off-screen ---
     if (viewMode !== 'tunnel') landmarkNodes.forEach((n) => {
+        if (!n.reveal) { n.labelAt = null; return; }      // not reached yet
         const p = projectPoint(n.pos, w, h);
-        const alpha = 0.45 + 0.55 * n.weight;
+        const alpha = (0.45 + 0.55 * n.weight) * n.reveal;
         const size = 9 + 4 * n.weight;
 
         if (p.onScreen) {

@@ -88,8 +88,8 @@ function updateRadar() {
     ctx.clearRect(0, 0, RADAR_SIZE, RADAR_SIZE);
 
     const light = bgThemeKey === 'light';
-    const lineRGB = light ? '10,10,20' : '255,255,255';
-    const accent = light ? '#5570cc' : '#7d96e8';
+    const lineRGB = light ? '30,28,24' : '255,255,255';
+    const accent = light ? '#22211e' : '#e8e9f0';   // chrome is greyscale; hue is for chords
     const cx = RADAR_SIZE / 2, cy = RADAR_SIZE / 2;
     const R = RADAR_SIZE / 2 - 22;
     const STEP = Math.PI / 6;
@@ -112,7 +112,7 @@ function updateRadar() {
         ctx.stroke();
     }
     const topPitch = radarTopPitch();
-    ctx.font = '10px "Courier New", monospace';
+    ctx.font = '500 9.5px "IBM Plex Mono", Consolas, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (let pc = 0; pc < 12; pc++) {
@@ -121,13 +121,13 @@ function updateRadar() {
         ctx.beginPath();
         ctx.moveTo(cx, cy);
         ctx.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
-        ctx.lineWidth = isTonic ? 2.5 : 1;
+        ctx.lineWidth = isTonic ? 1.5 : 1;
         ctx.strokeStyle = isTonic ? accent : `rgba(${lineRGB},0.22)`;
         ctx.stroke();
 
         const lx = cx + Math.cos(a) * (R + 12);
         const ly = cy + Math.sin(a) * (R + 12);
-        ctx.font = isTonic ? 'bold 11px "Courier New", monospace' : '10px "Courier New", monospace';
+        ctx.font = isTonic ? '600 10.5px "IBM Plex Mono", Consolas, monospace' : '500 9.5px "IBM Plex Mono", Consolas, monospace';
         ctx.fillStyle = isTonic ? accent : `rgba(${lineRGB},0.55)`;
         ctx.fillText(PITCH_NAMES[pc], lx, ly);
     }
@@ -205,7 +205,7 @@ function updateRadar() {
     // Current chord label (roman numeral) beside its dot
     const cur = progression[currentIndex];
     ctx.globalAlpha = 0.95;
-    ctx.font = 'bold 11px "Segoe UI", "Microsoft YaHei", sans-serif';
+    ctx.font = '600 11px "IBM Plex Mono", Consolas, monospace';
     ctx.fillStyle = getChordColorHexStr(cur);
     ctx.fillText(cur.label || '', curX, curY - 11);
     ctx.globalAlpha = 1;

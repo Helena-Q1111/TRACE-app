@@ -14,6 +14,8 @@
 // refuses to export unless the checkpoint reproduces embedding_table_v2.json.
 
 const AE_W = 380, AE_H = 250;          // logical panel size (px)
+const AE_H_FORWARD = 212;              // the forward view ends at the latent readout
+                                       // (the TPS comparison lives in the move panel above)
 const AE_PILL_W = 168, AE_PILL_H = 26;
 const AE_SCALE = { pill: 1, panel: 1, expanded: 2.2 };
 const AE_ANIM_MS = 700;
@@ -148,12 +150,12 @@ function aeSyncColors() {
     // ground, no border. Text and marks carry the readability instead, so the
     // ink/dim steps are pushed a little brighter than the chrome version was.
     aeColors = key === 'light'
-        ? { ink: '#1b1b26', dim: '#5c5c72', faint: '#8e8ea6', accent: '#4a63c4',
+        ? { ink: '#22211e', dim: '#6e6c66', faint: '#a5a39c', accent: '#22211e',
             latent: '#0f6c7e', tps: '#96580b', neg: '#b8425c', ok: '#247a4d',
-            line: '#c9c9d8', ground: 'rgba(248,248,251,0.30)', fabric: 0.09 }
-        : { ink: '#ececf5', dim: '#9a9ab4', faint: '#6a6a84', accent: '#8ba3ec',
+            line: '#d6d3cb', ground: 'rgba(250,249,246,0.30)', fabric: 0.09 }
+        : { ink: '#e8e9f0', dim: '#8d8fa0', faint: '#5d5f70', accent: '#e8e9f0',
             latent: '#6fdff0', tps: '#f5ab5e', neg: '#e88a9b', ok: '#6ed49b',
-            line: '#2b2b46', ground: 'rgba(6,6,15,0.26)', fabric: 0.07 };
+            line: '#2a2a3a', ground: 'rgba(6,6,15,0.26)', fabric: 0.07 };
     aeFabric = null;
     aeDirty = true;
 }
@@ -167,8 +169,9 @@ function aeRgba(hex, a) {
 // -------------------------------------------------------------------- canvas
 function aeLogicalSize() {
     if (aeState === 'pill') return [AE_PILL_W, AE_PILL_H];
-    return [AE_W, AE_H];
+    return [AE_W, aeH()];
 }
+const aeH = () => (aeView === 'forward' ? AE_H_FORWARD : AE_H);
 
 function aeResize() {
     if (!aeCanvas) return;
@@ -209,7 +212,7 @@ function aeBuildFabric() {
     const dpr = aeCanvas._dpr;
     const cv = document.createElement('canvas');
     cv.width = AE_W * dpr;
-    cv.height = AE_H * dpr;
+    cv.height = AE_H_FORWARD * dpr;
     const g = cv.getContext('2d');
     g.scale(dpr, dpr);
     g.lineWidth = 0.35;
@@ -263,14 +266,14 @@ function aeHeader(title, right) {
         const on = aeView === view;
         aeCtx.strokeStyle = aeRgba(on ? aeColors.accent : aeColors.line, 1);
         aeCtx.lineWidth = 0.7;
-        aeRoundRect(aeCtx, x, AE_H - 16, w, 12, 2);
+        aeRoundRect(aeCtx, x, aeH() - 16, w, 12, 2);
         if (on) { aeCtx.fillStyle = aeRgba(aeColors.accent, 0.18); aeCtx.fill(); }
         aeCtx.stroke();
-        aeText(label, x + w / 2, AE_H - 7, {
-            size: 6.5, weight: on ? 600 : 400,
+        aeText(label, x + w / 2, aeH() - 7, {
+            size: 7, weight: on ? 600 : 400,
             color: on ? aeColors.accent : aeColors.faint, align: 'center'
         });
-        aeHitRegions.push({ x, y: AE_H - 16, w, h: 12, action: 'view:' + view });
+        aeHitRegions.push({ x, y: aeH() - 16, w, h: 12, action: 'view:' + view });
         x += w + 5;
     });
 
@@ -326,7 +329,7 @@ function aeDrawForward(chord, prev, p) {
     }
     aeCtx.save();
     aeCtx.globalAlpha = 0.9;
-    aeCtx.drawImage(aeFabric, 0, 0, AE_W, AE_H);
+    aeCtx.drawImage(aeFabric, 0, 0, AE_W, AE_H_FORWARD);
     aeCtx.restore();
 
     const m = aeModel.m2;
@@ -410,7 +413,7 @@ function aeDrawForward(chord, prev, p) {
             aeCtx.stroke();
         }
         aeText(AE_COLS[L].lab, AE_COLS[L].x, 172,
-            { size: 7, color: L === 3 ? aeColors.latent : aeColors.dim, align: 'center' });
+            { size: 7.5, color: L === 3 ? aeColors.latent : aeColors.dim, align: 'center' });
     }
 
     // input dimension names; tensions are called out so the tension stage of
@@ -426,57 +429,13 @@ function aeDrawForward(chord, prev, p) {
             align: 'right'
         });
     }
-    aeText('encoder', 82, 30, { size: 6.5, color: aeColors.faint, align: 'center' });
-    aeText('decoder', 298, 30, { size: 6.5, color: aeColors.faint, align: 'center' });
+    aeText('encoder', 82, 30, { size: 7, color: aeColors.faint, align: 'center' });
+    aeText('decoder', 298, 30, { size: 7, color: aeColors.faint, align: 'center' });
 
     aeText('latent z =', 12, 186, { size: 7.5, color: aeColors.latent });
     aeText(`(${f.z[0].toFixed(2)}, ${f.z[1].toFixed(2)}, ${f.z[2].toFixed(2)})`,
         AE_W - 12, 186, { size: 9, weight: 600, color: aeColors.latent, align: 'right' });
 
-    aeTpsStrip(chord, prev, 196, p);
-}
-
-// Compact theory-vs-model comparison under the network
-function aeTpsStrip(chord, prev, y0, p) {
-    aeCtx.strokeStyle = aeRgba(aeColors.line, 1);
-    aeCtx.lineWidth = 0.6;
-    aeCtx.beginPath();
-    aeCtx.moveTo(10, y0 - 4);
-    aeCtx.lineTo(AE_W - 10, y0 - 4);
-    aeCtx.stroke();
-
-    if (!prev) {
-        aeText('TPS · first chord, no pair yet', 12, y0 + 12,
-            { size: 7.5, color: aeColors.faint });
-        return;
-    }
-    const k1 = aeChordKey(prev), k2 = aeChordKey(chord);
-    const t = aeTps(k1, k2);
-    const d = euclideanDistance(prev.coords, chord.coords);
-
-    aeText(`TPS  ${prev.label} → ${chord.label}`, 12, y0 + 7,
-        { size: 7.5, weight: 600, color: aeColors.ink });
-    aeText(`δ = j ${t.j} + k ${t.k}`, AE_W - 12, y0 + 7,
-        { size: 7, color: aeColors.faint, align: 'right' });
-
-    const bx = 92, bw = 216, scale = bw / 15;
-    const a = Math.max(0, Math.min(1, (p - 0.55) / 0.45));
-    aeCtx.fillStyle = aeRgba(aeColors.tps, 0.85);
-    aeCtx.fillRect(bx, y0 + 12, Math.min(bw, t.delta * scale) * a, 6);
-    aeText('δ theory', bx - 6, y0 + 17.5, { size: 7, color: aeColors.tps, align: 'right' });
-    aeText(t.delta.toFixed(2), AE_W - 12, y0 + 17.5,
-        { size: 8, weight: 600, color: aeColors.tps, align: 'right' });
-
-    aeCtx.fillStyle = aeRgba(aeColors.accent, 0.85);
-    aeCtx.fillRect(bx, y0 + 24, Math.min(bw, d * scale) * a, 6);
-    aeText('‖Δz‖ model', bx - 6, y0 + 29.5,
-        { size: 7, color: aeColors.accent, align: 'right' });
-    aeText(d.toFixed(2), AE_W - 12, y0 + 29.5,
-        { size: 8, weight: 600, color: aeColors.accent, align: 'right' });
-
-    const res = d - t.delta;
-    aeText(`residual ${res >= 0 ? '+' : ''}${res.toFixed(2)}    L_TPS = ${(res * res).toFixed(2)}`,
-        12, y0 + 44, { size: 7, color: Math.abs(res) < 1 ? aeColors.ok : aeColors.neg });
 }
 
 // -------------------------------------------------------------- tension view
@@ -517,10 +476,10 @@ function aeDrawTension(chord, prev, p) {
         ];
         rows.forEach((r, i) => {
             const y = 106 + i * 17;
-            aeText(r[0], LX, y, { size: 7, color: aeColors.faint });
+            aeText(r[0], LX, y, { size: 7.5, color: aeColors.faint });
             aeText(r[1], LR, y, { size: 8.5, weight: 600, color: r[2], align: 'right' });
         });
-        aeText('trained to pull d toward δ', LX, 190, { size: 6.5, color: aeColors.ok });
+        aeText('trained to pull d toward δ', LX, 190, { size: 7, color: aeColors.ok });
     } else {
         aeText('first chord — no pair yet', LX, 56, { size: 7.5, color: aeColors.faint });
     }
@@ -540,7 +499,7 @@ function aeDrawScatter(sx, sy, ss, p) {
     const pairs = aeScatterPairs();
     if (!pairs || pairs.n < 3) {
         aeText('need 3+ chords', sx + ss / 2, sy + ss / 2,
-            { size: 7, color: aeColors.faint, align: 'center' });
+            { size: 7.5, color: aeColors.faint, align: 'center' });
         return;
     }
     const maxD = pairs.maxDelta * 1.12;
@@ -572,22 +531,22 @@ function aeDrawScatter(sx, sy, ss, p) {
         aeCtx.fill();
     });
 
-    aeText('‖Δz‖ / mean ↑', sx, sy - 6, { size: 6.5, color: aeColors.faint });
-    aeText('δ →', sx + ss, sy + ss + 11, { size: 6.5, color: aeColors.faint, align: 'right' });
-    aeText(`${pairs.n} pairs`, sx + ss, sy - 6, { size: 6.5, color: aeColors.faint, align: 'right' });
+    aeText('‖Δz‖ / mean ↑', sx, sy - 6, { size: 7, color: aeColors.faint });
+    aeText('δ →', sx + ss, sy + ss + 11, { size: 7, color: aeColors.faint, align: 'right' });
+    aeText(`${pairs.n} pairs`, sx + ss, sy - 6, { size: 7, color: aeColors.faint, align: 'right' });
 
     // legend (two series must never be told apart by colour alone)
     let ly = sy + ss + 24;
     aeCtx.fillStyle = aeRgba(aeColors.accent, 0.9);
     aeCtx.beginPath(); aeCtx.arc(sx + 3, ly - 2.5, 2.6, 0, Math.PI * 2); aeCtx.fill();
     aeText(`M2 ρ ${pairs.rhoM2 >= 0 ? '+' : ''}${pairs.rhoM2.toFixed(2)}`, sx + 9, ly,
-        { size: 7, weight: 600, color: pairs.rhoM2 > 0.5 ? aeColors.ok : aeColors.tps });
+        { size: 7.5, weight: 600, color: pairs.rhoM2 > 0.5 ? aeColors.ok : aeColors.tps });
     if (pairs.hasM0) {
         ly += 11;
         aeCtx.fillStyle = aeRgba(aeColors.neg, 0.75);
         aeCtx.beginPath(); aeCtx.arc(sx + 3, ly - 2.5, 2.1, 0, Math.PI * 2); aeCtx.fill();
         aeText(`M0 ρ ${pairs.rhoM0 >= 0 ? '+' : ''}${pairs.rhoM0.toFixed(2)}`, sx + 9, ly,
-            { size: 7, color: aeColors.neg });
+            { size: 7.5, color: aeColors.neg });
     }
 }
 
@@ -660,12 +619,12 @@ function updateAeViz() {
 
     // No border: the panel is meant to sit in the starfield, not on top of it
     aeCtx.fillStyle = aeColors.ground;
-    aeRoundRect(aeCtx, 0.5, 0.5, AE_W - 1, AE_H - 1, 6);
+    aeRoundRect(aeCtx, 0.5, 0.5, AE_W - 1, aeH() - 1, 6);
     aeCtx.fill();
 
     if (!chord) {
         aeHeader('AUTOENCODER', '15→64→32→3');
-        aeText('import a MIDI file to begin', AE_W / 2, AE_H / 2,
+        aeText('import a MIDI file to begin', AE_W / 2, aeH() / 2,
             { size: 8, color: aeColors.faint, align: 'center' });
         aeDirty = false;
         return;
@@ -694,7 +653,7 @@ function aeOnClick(ev) {
     for (const h of aeHitRegions) {
         if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) {
             const [kind, value] = h.action.split(':');
-            if (kind === 'view') aeView = value;
+            if (kind === 'view') { aeView = value; aeResize(); }
             else { aeState = value; aeResize(); }
             aeAnimStart = performance.now();
             aeDirty = true;

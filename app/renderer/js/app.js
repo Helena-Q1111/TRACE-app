@@ -4,18 +4,31 @@
 
 const _clock = new THREE.Clock();
 
+// A chord's start/end on the audio timeline (seconds from the top of the MIDI)
+const chordStartSec = (c) => ((c.bar - 1) * beatsPerBar + (c.beatInBar || 0)) * 60 / bpm;
+const chordEndSec = (c) => chordStartSec(c) + (c.durBeats || beatsPerBar) * 60 / bpm;
+
 function animate() {
     requestAnimationFrame(animate);
     const t = _clock.getElapsedTime();
 
-    // Update playback: advance per chord segment using its actual duration
+    // Update playback. The audio clock leads: a chord becomes current when
+    // the audio reaches the chord's own start time. Advancing by summing
+    // segment durations from "the frame we noticed" lost up to a frame per
+    // chord (0.47 s behind by the end of a 15-chord piece), and ignored where
+    // the first chord starts - pieces with a pickup or leading rest showed
+    // every chord over a second before it sounded.
     if (isPlaying && progression.length > 0) {
         const now = Date.now();
-        const elapsed = now - lastBeatTime;
-        const segDurMs = (progression[currentIndex].durBeats || beatsPerBar) * beatDurationMs;
+        const nextIndex = (currentIndex + 1) % progression.length;
+        const boundary = nextIndex === 0
+            ? chordEndSec(progression[currentIndex])
+            : chordStartSec(progression[nextIndex]);
+        const audioSec = midiStartTime
+            ? (now - midiStartTime) / 1000
+            : chordStartSec(progression[currentIndex]) + (now - lastBeatTime) / 1000;
 
-        if (elapsed > segDurMs) {
-            const nextIndex = (currentIndex + 1) % progression.length;
+        if (audioSec >= boundary) {
 
             // Create interpolation animation to next chord
             if (progression[nextIndex]) {
@@ -30,7 +43,8 @@ function animate() {
             }
 
             currentIndex = nextIndex;
-            lastBeatTime = now;
+            // the chord's true start on the audio clock, not this frame
+            lastBeatTime = midiStartTime && nextIndex !== 0 ? midiStartTime + boundary * 1000 : now;
             if (currentIndex === 0) {
                 if (isExporting) {
                     finishVideoExport();    // full pass recorded: stop and save
@@ -124,6 +138,7 @@ function animate() {
     updateLandmarks(t);
     updateRadar();
     updateAeViz();
+    updateTimeline();
 
     // Render with (selective) bloom post-processing
     renderFrame();
@@ -140,9 +155,17 @@ initAudio();
 bindControls();
 bindProjects();          // MIDI import, start prompt, two-slot project cache
 bindMovePanel();        // move panel timeline: click to jump
+bindTimeline();         // progress bar in the control strip: click / drag to seek
+bindChordEditor();      // full-screen chord editor (E)
 initChordSpace();       // diatonic landmarks + boundary shell + heads-up anchors
 initRadar();            // circle-of-fifths tension radar (top-right)
 initAeViz();            // autoencoder panel (bottom-right)
 embeddingTableReady = loadEmbeddingTable();   // full (root, pcs) -> coords table
 embeddingTableReady.then(initViews);           // experimental view layouts need the table
+// Canvas panels draw text before webfonts are used anywhere in the DOM:
+// load Plex up front and redraw the AE panel once it is in.
+if (document.fonts) {
+    Promise.all(['500 10px "IBM Plex Mono"', '600 10px "IBM Plex Mono"', '400 10px "IBM Plex Mono"']
+        .map(f => document.fonts.load(f))).then(() => { aeDirty = true; }).catch(() => {});
+}
 animate();

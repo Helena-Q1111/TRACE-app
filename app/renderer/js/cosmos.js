@@ -44,7 +44,10 @@ function initCosmos() {
 
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geometry.setAttribute('color', new THREE.BufferAttribute(palettes.bright, 3));
+        // A copy: the attribute is overwritten on every theme switch, and
+        // sharing palettes.bright would overwrite the palette itself (the
+        // stars came back near-black after a trip to the light theme).
+        geometry.setAttribute('color', new THREE.BufferAttribute(palettes.bright.slice(), 3));
 
         const material = new THREE.PointsMaterial({
             size: cfg.size,
@@ -155,6 +158,7 @@ function applyBgTheme(key) {
         stars.geometry.attributes.color.array.set(palette);
         stars.geometry.attributes.color.needsUpdate = true;
         stars.material.blending = theme.starAdditive ? THREE.AdditiveBlending : THREE.NormalBlending;
+        stars.visible = theme.starsVisible;
         stars.material.needsUpdate = true;
         u.opacityScale = theme.starOpacityScale;
     });
@@ -162,6 +166,7 @@ function applyBgTheme(key) {
     cosmos.nebulae.forEach((sprite) => { sprite.visible = theme.nebulaVisible; });
 
     if (cosmos.dust) {
+        cosmos.dust.visible = theme.starsVisible;
         cosmos.dust.material.color.copy(sceneColor(theme.dustColor));
         cosmos.dust.material.blending = theme.starAdditive ? THREE.AdditiveBlending : THREE.NormalBlending;
         cosmos.dust.material.opacity = theme.dustOpacity;
@@ -171,6 +176,8 @@ function applyBgTheme(key) {
     if (bloomPass) bloomPass.strength = theme.bloomStrength;
 
     document.body.classList.toggle('theme-light', key === 'light');
+    const density = document.getElementById('densityControl');   // no stars on paper
+    if (density) density.hidden = !theme.starsVisible;
 
     // Re-apply density (light theme shows fewer dots) and restyle progression visuals
     applyStarDensity(starDensity);
