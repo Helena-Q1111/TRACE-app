@@ -1,148 +1,74 @@
 # TRACE Visualizer
 
-**TRACE** (Tension-Regularized Auto-encoded Chord Embeddings) 的桌面可视化器：导入一个 MIDI 文件，识别其中的和弦进行，在模型学到的 3D 张力潜空间中以星际航行的方式播放整首曲子的和声轨迹。
+TRACE Visualizer turns a MIDI performance into an interactive map of its harmony. Open a `.mid` or `.midi` file to hear the piece and watch its chord progression travel through a three-dimensional tonal space.
 
----
+The app is the interactive companion to the **TRACE-Research** project. The research repository presents the training experiments and evaluation results behind the learned chord space; this app lets you explore that space through music.
 
-## 一、TRACE 模型是什么
+## Explore a piece
 
-### 核心假设
+- **Open a MIDI file** from the app or drag it into the scene. TRACE reads tempo, meter and notes across tracks, then identifies the chord progression and estimates the key.
+- **Follow the harmony in 3D.** Chords appear as colored points connected by an animated path. Labels show chord names and Roman-numeral scale degrees; spatial landmarks help orient the progression around its tonal center.
+- **Listen as you explore.** Play, pause, seek and jump through the piece while the audio and visualization stay synchronized. Choose piano, sine, electric piano or pad timbres.
+- **Inspect chord movement.** Compare each transition's tonal-distance components with the learned embedding distance, see how chord tones move, and follow the progression's distance from the tonic.
+- **Watch the circle-of-fifths radar.** Chords move around the wheel as the tonal center changes, with their distance from the tonic shown as radial distance.
+- **See the embedding in action.** The live model panel shows how the current chord maps to its point in the 3D space. Its tension view compares theory distances with learned transition distances across the piece.
 
-> 用一个模拟人类短时记忆的"局部认知滑窗"（8 个和弦，窗口内移调到关系大调），把 15 维复合和弦特征经最简单的 MLP 自编码器压缩到 3 维；训练时仅用 MSE 强制**相邻和弦的 3D 物理距离逼近 Lerdahl TPS（Tonal Pitch Space）理论距离**。这样一个极简模型能否自动涌现出与人类听觉心理学高度对齐的几何拓扑？
+## Edit the recognized chords
 
-### 输入表示（15 维）
+Open **Edit chords…** or press **E** to review and correct the progression on a bar-by-bar grid.
 
-| 维度 | 内容 |
-|---|---|
-| 0–11 | 加权 Chroma：根音 1.0，其他和弦音 0.5（v2 表中低音≠根音时低音 0.75） |
-| 12–13 | 根音圆周编码 `[sin(2πr/12), cos(2πr/12)]` |
-| 14 | 对数时值 `log(1+duration)` |
+- Select a chord to change its name, bar or beat. Beat positions can be set to quarter-beat precision.
+- Double-click a beat to add a chord there; the new chord starts as a copy of the chord sounding at that position.
+- Delete chords, undo edits, cancel a session, or revert the progression to the original recognition.
+- Apply edits to refresh the visualization and playback. Edited chords are saved with the MIDI project and remain available when you reopen it.
+- The editor accepts common chord spellings, extensions and slash-bass notation, with live feedback as you type.
 
-### 架构与损失
+The progress bar also supports clicking and dragging to any point in the piece, including the middle of a chord.
 
-```
-Encoder: Linear(15,64) → ReLU → Linear(64,32) → ReLU → Linear(32,3)
-Decoder: 对称反向，Chroma 用 Sigmoid、圆周编码 L2 归一化回单位圆
+## Make it yours
 
-Loss = 重构 MSE + λ · TPS 距离损失
-TPS 距离 δ = γj·j + γk·k
-  j = 两和弦根音在五度圈上的环形最短距离 (0–6)
-  k = 两和弦音级集合的对称差（不重合音数）
-```
+- Choose chord colors by harmonic function or chord quality, with several palette styles.
+- Switch between a starfield and a light theme.
+- Adjust star density, path width and how quickly older sections fade.
+- Explore the 3D scene by moving the camera; tonal landmarks stay available as visual reference points.
+- Export a complete playback as a video with audio. TRACE creates MP4 when the system supports it and uses WebM as a fallback.
 
-编码器是逐和弦独立的（无上下文），所以每个 (root, bass, pcs) 组合有唯一确定的 3D 坐标——这是"查表即可视化"的前提。全部实现在 `scripts/autoencoder.py` / `scripts/train_ae.py`。
+TRACE keeps the two most recently opened MIDI projects, including chord edits, key and modulation settings, and the last playback position.
 
-### 关键结果
+## Get started
 
-与人类听觉张力评分（心理声学测试）的 Spearman 相关：
+### Desktop app
 
-| 模型 | ρ | p |
-|---|---|---|
-| M0 无约束 AE（vanilla） | **−0.365**（反向！） | 0.10（不显著） |
-| **M2 TPS 约束 AE（TRACE）** | **+0.577** | **0.006** |
-
-纯重构目标学到的几何与人类认知**相反**；加入 TPS 归纳偏置后翻转为显著正相关（+258%）。详见根目录 `OUTCOME.md` / `FINAL_RESULTS.md`。
-
----
-
-## 二、这个软件做什么
-
-单个 MIDI 文件进来，完整流水线全部在前端完成：
-
-```
-MIDI 导入 → 多轨解析(tempo/拍号) → 和弦识别(14核心质量余弦打分 + 张力层，逐小节DP分段)
-→ 调性判定(K-S 猜调，可手动改调/加转调点) → 移调到 C → 查 embedding 表
-→ 3D 轨迹渐进播放(Three.js) + 钢琴音频(Tone.js) + 五度圈张力雷达
-+ 自编码器面板(实时前向) + 视频导出
-```
-
-主要功能一览（每个功能的详细逻辑见 **[features.md](features.md)**）：
-
-- **3D 和声轨迹**：和弦按 embedding 坐标（sinh 对比度重映射）逐个点亮，路径线从前一个和弦的颜色渐变到后一个（功能流向），粗细分四档编码张力大小（平涂、不发光）；每个和弦带一圈自身颜色的淡光晕，离调和弦更亮；级数（RNA 罗马数字）标签悬浮于每个和弦上方
-- **信息栏**（左上角，载入 MIDI 后出现，移动面板 + 自编码器面板合为一列）——**移动面板**：「和弦 A → 和弦 B」、TPS 分解 δ = i + j + k 与模型距离对照、和弦内音如何移动、全曲离 I 的距离曲线（点击跳转）、最近四步
-- **五度圈张力雷达**（右上角）：12 音按五度圈排列，调性中心转到正上方（转调有旋转动画）；和弦落在根音轴上，半径 = 到 I 级的张力距离（全曲分位数均衡归一化），同屏 5 个和弦渐隐拖尾
-- **空间参照**：一个绕主音的正二十面体边界，以离主音最远的那个和弦定尺寸（内切半径刚好够到它），12 个角上标着到 I 级的距离；I ii iii IV V vi vii° 七个调内地标常驻，大小与亮度按调性权重给（I 最大、vii° 最小）；跑出画面的地标变成屏幕边缘的箭头，加上一条连回 I 的系绳——镜头怎么动都有锚点
-- **自编码器面板**（右下角）：当前和弦的 15 维输入逐层跑过 15→64→32→**3**，终点就是它在星图里那颗球的坐标；旁边并排放着理论张力 δ 与模型实测距离 ‖Δz‖。切到张力视图还能看到全曲的 δ–‖Δz‖ 散点与 M2/M0 的 Spearman ρ 对照——TPS 正则项的作用变成一屏可以当场按下去的对比
-- **和弦识别**：14 个核心质量的加权余弦打分 + 独立的张力层（♭9/9/♯9/11/♯11/♭13/13），扩展音表达力强于固定模板组合（可以写出 `Cmaj7(9,13)`）。在 Hooktheory 全量 420,877 个片段上，音级集合完全正确率 **92.1%**、凭空添音 **6.2%**（旧版 29 模板分别是 49.8% / 50.1%），见 `scripts/eval_chord_recognition.py`。
-  分段与低音另有全流程基准 `scripts/eval_segmentation.py`（把 Hooktheory 渲染成柱式和弦与阿尔贝蒂低音两种 MIDI 织体，跑真正的 `analysis.js`）。
-  另有一层 **voicing 判定**：二度与九度是同一个音级，只有音区能区分——若 sus 的那个音只在根音上方一个八度以外发声，它其实是叠在三和弦上的 9/11 音，会被改判（`mysong.mid` 上 sus 从 13/32 降到 5/32）
-- **调性系统**：自动猜调 + 侧栏确认，支持"第 N 小节转调"多段标记，级数与坐标随之重算
-- **播放**：四种音色可选（Salamander 钢琴采样 / 正弦 / FM 电钢 / 慢起铺底，音量已按实测 RMS 对齐）、空格播放/暂停、音画严格同步（暂停/跳转/循环都对齐）
-- **视频导出**：一键从头录制整曲（画面+声音），优先 H.264+AAC MP4，自动回退 WebM，产物带字节级编码自检
-- **外观**：和弦配色两步选择（功能三色/大小四色 × 三种色调）、深空/纸白主题、星星密度/线宽/轨迹淡出滑条
-
-## 三、快速开始
-
-### 桌面应用（推荐）
+Requires Node.js and npm.
 
 ```bash
-cd webapp/app
-npm install        # 首次
-npm start          # 启动
-npm run dist       # 打包单文件 exe → webapp/build/
+cd app
+npm install
+npm start
 ```
 
-### 浏览器模式
+To create the portable Windows build:
 
 ```bash
-python webapp/server.py 8123
-# 打开 http://localhost:8123/app/renderer/index.html
+npm run dist
 ```
 
-（浏览器下 embedding 表经 fetch 加载，钢琴采样加载失败时自动降级为合成器音色。）
+The build is written to `webapp/build/`.
 
-## 四、目录结构
+### Run in a browser
 
-```
-webapp/
-  demomidi/                  四份由简到难的测试 MIDI + 每首的写谱和声（见 demomidi/README.md）
-  app/
-    main.js, preload.js      Electron 主进程 + IPC（读 JSON/二进制）
-    renderer/
-      index.html             页面骨架
-      css/style.css
-      js/
-        config.js            常量、配色、调性/级数工具、共享状态
-        analysis.js          和弦识别（两级：余弦打分 + 张力层）+ DP 分段 + K-S 猜调
-        chords.js            embedding 查询、progression 构建、3D 轨迹渲染
-        landmarks.js         正二十面体边界、调内地标、抬头锚点层
-        views.js             实验视图：张力碗 / 引力井 / 隧道（待取舍）
-        aeviz.js             自编码器面板（实时前向）
-        scene.js             相机/灯光/后期(选择性 Bloom：只有星空与流星发光)
-        cosmos.js            星空/星云/尘埃背景
-        particles.js         粒子工具与和弦粒子云
-        playback.js          MIDI 解析 + 钢琴采样播放
-        radar.js             五度圈张力雷达
-        export.js            视频导出
-        ui.js                侧栏/快捷键/外观控件、移动面板
-        projects.js          MIDI 导入（开屏卡片、拖放）与两个工程的缓存
-        app.js               入口 + 动画主循环
-      vendor/                three.js r128、Tone.js、tween、midi-parser、钢琴采样（全离线）
-      data/embedding_table_v2.json   159,744 项 (root:bass:[pcs]) → 3D 坐标
-      data/trace_model.json          自编码器权重 6,406 个（79KB，面板实时前向用）
-      data/latent_space.json         极端和弦 + 调内地标（2.0KB）
-  generate_table_v2.py       用训练好的模型重新导出 embedding 表
-  server.py                  浏览器模式静态服务器
-  build/                     npm run dist 的 exe 产物
-```
-
-## 五、Embedding 表
-
-`embedding_table_v2.json`（8.6MB，159,744 项）由 `generate_table_v2.py` 从 `outputs/output_ae/best_model.pt` 导出，覆盖**所有**包含根音的音级子集 × 子集内任意低音，键格式 `"root:bass:[sorted pcs]"`。低音感知编码（bass≠root 时 chroma[bass]=0.75）让转位拥有独立坐标。
-
-换了新 checkpoint 后重新导出并拷入 `app/renderer/data/`：
+From the `webapp` directory, serve the renderer files locally:
 
 ```bash
-python webapp/generate_table_v2.py
+python -m http.server 8000 --directory app/renderer
 ```
 
-所有 embedding 都以 C 为基准；运行时按当前调把 (root, bass, pcs) 移调到 C 再查表（小调对齐关系大调）。
+Then open [http://localhost:8000](http://localhost:8000). Start playback or select a timbre once to enable browser audio.
 
-## 六、遗留文件说明
+## Try the examples
 
-- `midi_to_chords.py` / `chord_table.json` / `*_progression.json`：v1 时代的 Python 离线识谱流水线与背景星座表，**当前 app 已不使用**（识别全部在前端完成），保留仅供参考
-- `embedding_table.json`（2.7MB）：不含低音信息的 v1 表，已被 v2 取代
+The [`demomidi/`](demomidi/) folder contains MIDI examples, from simple triads to more involved progressions. Open any of them in TRACE to compare how the visualization and chord editor respond to different music.
 
-## License
+## Research companion
 
-Research project. Use and modify freely for academic/personal purposes.
+TRACE Research describes the 3D embedding, training setup, chord-feature ablations and evaluation against tonal-organization and sequence-tension references. Together, the two projects provide the experimental results and an interactive way to experience the learned harmonic space.
