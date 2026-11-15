@@ -2,7 +2,7 @@
 
 TRACE Visualizer turns a MIDI performance into an interactive map of its harmony. Open a `.mid` or `.midi` file to hear the piece, follow its chord progression through a three-dimensional tonal space, and edit the analysis as you listen.
 
-The app is the interactive companion to **TRACE-Research**, which studies how tonal-theory distances shape a learned 3D chord space and evaluates that space against human tonal-organization and tension data. TRACE Visualizer brings that research into a form people can hear, explore and use.
+The app is the interactive companion to [TRACE Research](https://github.com/Helena-Q1111/TRACE-research), which studies how tonal-theory distances shape a learned 3D chord space and evaluates that space against human tonal-organization and tension data. TRACE Visualizer brings that research into a form people can hear, explore and use.
 
 ## Starting point
 
@@ -21,6 +21,17 @@ TRACE analyzes the notes across MIDI tracks and turns them into a progression of
 After a MIDI file is opened, TRACE draws its chord progression as a route through the tonal space. Chords appear one by one during playback as colored spheres with chord-name and Roman-numeral labels. The connecting path blends the colors of adjacent chords, while four line-width levels show the size of each move in the learned space. A soft chord halo and particle field make each point easy to follow against either the starfield or paper background.
 
 Spatial anchors keep the route interpretable as the camera moves. The tonic and the seven diatonic scale degrees remain available as landmarks, and a surrounding reference shape shows the tonal distances radiating from the home chord. Off-key chords stand out in the scene, so listeners can see where a progression moves beyond its current key.
+
+### Switch between four spatial views
+
+The bottom view switcher offers four ways to read the same progression:
+
+- **Original** follows the chord-by-chord route through the learned embedding as the camera moves with the music.
+- **Bowl** keeps the learned chord distances and centers the view on the tonic, making the learned geometry easier to survey as a whole.
+- **Well** arranges roots around an ideal circle of fifths while preserving each chord's true distance from the tonic. A **Learned–Ideal** slider smoothly blends the learned layout into this tonal reference, and **Top** opens the well as a 2D map.
+- **Tunnel** carries the well's cross-section forward along the song's timeline. Chords occupy positions by harmonic distance and time, so the progression can be read as a moving landscape.
+
+Switching views keeps the current progression and playback position, letting listeners compare the learned geometry, an idealized tonal map and the timeline view without reloading the music.
 
 ### See what changes from chord to chord
 
@@ -111,4 +122,4 @@ The [`demomidi/`](demomidi/) folder contains MIDI examples, from simple triads t
 
 ## Research companion
 
-TRACE-Research documents the experiment design, feature ablations and evaluation results behind the learned chord space. Together, the two projects connect the research question—how tonal relationships can shape a compact chord representation—with an interactive way to experience those relationships in music.
+[TRACE Research](https://github.com/Helena-Q1111/TRACE-research) documents the experiment design, feature ablations and evaluation results behind the learned chord space. Together, the two projects connect the research question—how tonal relationships can shape a compact chord representation—with an interactive way to experience those relationships in music.
