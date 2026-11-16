@@ -116,6 +116,12 @@ python -m http.server 8000 --directory app/renderer
 
 Then open [http://localhost:8000](http://localhost:8000). Start playback or select a timbre once to enable browser audio.
 
+### Deploy the web version to Vercel
+
+The browser version uses the same renderer as the desktop app. Vercel serves `app/renderer/` as a static site; no server-side API or build step is needed. Connect the `TRACE-app` repository to Vercel with the project root set to `app/renderer`, then deploy. The Vercel configuration lives in that folder.
+
+The MIDI file stays in the browser. Recent projects and chord edits are stored in that browser's local storage and are not shared between devices.
+
 ## Try the examples
 
 The [`demomidi/`](demomidi/) folder contains MIDI examples, from simple triads to jazz and classical progressions. Open one in TRACE to explore the automatic analysis, playback and chord editor.

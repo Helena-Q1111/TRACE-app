@@ -391,7 +391,7 @@ function panelRects(w, h) {
     if (!host) return [];
     const base = host.getBoundingClientRect();
     const out = [];
-    ['circleCanvas', 'infoDock', 'viewBar'].forEach((id) => {
+    ['circleCanvas', 'movePanel', 'aePanel', 'viewBar'].forEach((id) => {
         const el = document.getElementById(id);
         if (!el || el.offsetParent === null) return;
         const r = el.getBoundingClientRect();

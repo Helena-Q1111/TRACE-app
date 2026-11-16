@@ -210,7 +210,27 @@
             </div>
             <!-- Autoencoder panel: how the current chord's 3D coordinate is computed -->
             <div class="ae-panel" id="aePanel">
-                <canvas id="aeCanvas"></canvas>
+                <div class="ae-head">
+                    <span class="ae-title">Autoencoder</span>
+                    <span class="ae-info" id="aeInfo"></span>
+                    <div class="ae-tabs" id="aeTabs">
+                        <button class="ae-tab-btn active" data-view="forward" title="Network forward pass">Forward</button>
+                        <button class="ae-tab-btn" data-view="tension" title="TPS tension constraint and scatter">Tension</button>
+                    </div>
+                    <div class="ae-actions">
+                        <span class="ae-esc-hint" title="Press Escape to restore">ESC</span>
+                        <button class="ae-action-btn" id="aeZoomBtn" title="Maximize">&#x2922;</button>
+                        <button class="ae-action-btn" id="aeMinBtn" title="Minimise">&ndash;</button>
+                    </div>
+                </div>
+                <div class="ae-summary" id="aeSummary" hidden>
+                    <span class="ae-summary-arch">15&rarr;64&rarr;32&rarr;3</span>
+                    <span class="ae-summary-chord" id="aeSummaryChord"></span>
+                    <span class="ae-summary-z" id="aeSummaryZ"></span>
+                </div>
+                <div class="ae-body" id="aeBody">
+                    <canvas id="aeCanvas"></canvas>
+                </div>
             </div>
         </div>
     </div>

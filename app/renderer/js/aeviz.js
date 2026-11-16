@@ -16,13 +16,12 @@
 const AE_W = 380, AE_H = 250;          // logical panel size (px)
 const AE_H_FORWARD = 212;              // the forward view ends at the latent readout
                                        // (the TPS comparison lives in the move panel above)
-const AE_PILL_W = 168, AE_PILL_H = 26;
-const AE_SCALE = { pill: 1, panel: 1, expanded: 2.2 };
+const AE_SCALE = { panel: 1, expanded: 2.2 };
 const AE_ANIM_MS = 700;
 
 let aeModel = null;             // {m2:{...}, m0:{...}} weight arrays
 let aeCanvas = null, aeCtx = null;
-let aeState = 'panel';          // 'pill' | 'panel' | 'expanded'
+let aeState = 'panel';          // 'panel' | 'expanded'
 let aeView = 'forward';         // 'forward' | 'tension'
 let aeVisible = true;
 let aeDirty = true;
@@ -168,20 +167,19 @@ function aeRgba(hex, a) {
 
 // -------------------------------------------------------------------- canvas
 function aeLogicalSize() {
-    if (aeState === 'pill') return [AE_PILL_W, AE_PILL_H];
     return [AE_W, aeH()];
 }
-const aeH = () => (aeView === 'forward' ? AE_H_FORWARD : AE_H);
+const aeH = () => (aeView === 'forward' ? AE_H_FORWARD : (aeState === 'expanded' ? AE_H : 166));
 
 function aeResize() {
     if (!aeCanvas) return;
     const [lw, lh] = aeLogicalSize();
-    const scale = AE_SCALE[aeState];
+    const scale = AE_SCALE[aeState] || 1;
     const dpr = Math.min(2, window.devicePixelRatio || 1) * scale;
     aeCanvas.width = Math.round(lw * dpr);
     aeCanvas.height = Math.round(lh * dpr);
-    aeCanvas.style.width = (lw * scale) + 'px';
-    aeCanvas.style.height = (lh * scale) + 'px';
+    aeCanvas.style.width = '100%';
+    aeCanvas.style.height = 'auto';
     aeCanvas._dpr = dpr;
     aeFabric = null;
     aeDirty = true;
@@ -255,50 +253,7 @@ function aeTopContribs(w, act, outN, inN, K) {
 function aeHeader(title, right) {
     aeHitRegions = [];
     aeText(title, 12, 16, { size: 8.5, weight: 600, color: aeColors.ink });
-    if (right) aeText(right, AE_W - 44, 16, { size: 7.5, color: aeColors.faint, align: 'right' });
-
-    // View tabs sit bottom-RIGHT: the bottom-left of both views carries a
-    // readout line (the TPS residual), and the top row is taken by the title.
-    const tabs = [['FORWARD', 'forward'], ['TENSION', 'tension']];
-    let x = AE_W - 12 - 46 - 5 - 46;
-    tabs.forEach(([label, view]) => {
-        const w = 46;
-        const on = aeView === view;
-        aeCtx.strokeStyle = aeRgba(on ? aeColors.accent : aeColors.line, 1);
-        aeCtx.lineWidth = 0.7;
-        aeRoundRect(aeCtx, x, aeH() - 16, w, 12, 2);
-        if (on) { aeCtx.fillStyle = aeRgba(aeColors.accent, 0.18); aeCtx.fill(); }
-        aeCtx.stroke();
-        aeText(label, x + w / 2, aeH() - 7, {
-            size: 7, weight: on ? 600 : 400,
-            color: on ? aeColors.accent : aeColors.faint, align: 'center'
-        });
-        aeHitRegions.push({ x, y: aeH() - 16, w, h: 12, action: 'view:' + view });
-        x += w + 5;
-    });
-
-    // window controls
-    const ctl = [[AE_W - 34, aeState === 'expanded' ? '⤡' : '⤢',
-                  aeState === 'expanded' ? 'panel' : 'expanded'],
-                 [AE_W - 18, '–', 'pill']];
-    ctl.forEach(([cx, glyph, action]) => {
-        aeText(glyph, cx + 5, 17, { size: 9, color: aeColors.faint, align: 'center' });
-        aeHitRegions.push({ x: cx, y: 6, w: 14, h: 14, action: 'state:' + action });
-    });
-}
-
-// ----------------------------------------------------------------- pill view
-function aeDrawPill(chord) {
-    aeCtx.fillStyle = aeColors.ground;
-    aeRoundRect(aeCtx, 0.5, 0.5, AE_PILL_W - 1, AE_PILL_H - 1, 6);
-    aeCtx.fill();
-    aeText('15→64→32→3', 9, 17, { size: 8, weight: 600, color: aeColors.accent });
-    if (chord) {
-        const z = chord.coords;
-        aeText(`${z[0].toFixed(1)} ${z[1].toFixed(1)} ${z[2].toFixed(1)}`,
-            AE_PILL_W - 9, 17, { size: 8, color: aeColors.latent, align: 'right' });
-    }
-    aeHitRegions = [{ x: 0, y: 0, w: AE_PILL_W, h: AE_PILL_H, action: 'state:panel' }];
+    if (right) aeText(right, AE_W - 12, 16, { size: 7.5, color: aeColors.faint, align: 'right' });
 }
 
 // -------------------------------------------------------------- forward view
@@ -439,7 +394,130 @@ function aeDrawForward(chord, prev, p) {
 }
 
 // -------------------------------------------------------------- tension view
-function aeDrawTension(chord, prev, p) {
+// Research benchmark test evaluation data exported from TRACE-Research (held-out test split)
+const AE_BENCHMARK_DATA = {
+    meta: {
+        title: "TRACE-Research Evaluation Benchmark",
+        full15_rho: 0.970,
+        full15_rho_std: 0.001,
+        full15_kk_rho: 0.763,
+        full15_kk_std: 0.021,
+        full15_triplet: 0.82,
+        full15_bp_rho: 0.51,
+        full15_tps_mse: 0.392,
+        baseline_rho: 0.495,
+        baseline_kk_rho: -0.046,
+        baseline_tps_mse: 43.23
+    },
+    pairs: [
+        {"delta":0,"m1":0,"m0":0},{"delta":0,"m1":0,"m0":0},{"delta":0,"m1":0.007,"m0":0.04},
+        {"delta":0,"m1":0,"m0":0},{"delta":0,"m1":0.021,"m0":0.105},{"delta":0,"m1":0,"m0":0},
+        {"delta":0,"m1":0.027,"m0":0.073},{"delta":0,"m1":0.022,"m0":0.084},{"delta":0,"m1":0,"m0":0},
+        {"delta":0,"m1":0,"m0":0},{"delta":0,"m1":0,"m0":0},{"delta":0,"m1":0,"m0":0},
+        {"delta":0,"m1":0,"m0":0},{"delta":0,"m1":0.039,"m0":0.252},{"delta":0,"m1":0.047,"m0":0.093},
+        {"delta":0,"m1":0.015,"m0":0.103},{"delta":1,"m1":0.23,"m0":0.387},{"delta":1,"m1":0.243,"m0":0.202},
+        {"delta":2,"m1":0.41,"m0":0.269},{"delta":3,"m1":0.72,"m0":2.213},{"delta":4,"m1":0.954,"m0":0.889},
+        {"delta":4,"m1":0.781,"m0":1.438},{"delta":5,"m1":1.106,"m0":0.872},{"delta":5,"m1":1.105,"m0":0.879},
+        {"delta":5,"m1":1.114,"m0":1.894},{"delta":5,"m1":1.075,"m0":1.861},{"delta":5,"m1":1.089,"m0":0.755},
+        {"delta":5,"m1":1.096,"m0":1.461},{"delta":5,"m1":1.09,"m0":0.93},{"delta":5,"m1":1.074,"m0":1.892},
+        {"delta":5,"m1":1.099,"m0":1.987},{"delta":5,"m1":1.063,"m0":1.541},{"delta":5,"m1":1.11,"m0":0.856},
+        {"delta":5,"m1":1.075,"m0":1.958},{"delta":5,"m1":1.074,"m0":1.803},{"delta":5,"m1":0.994,"m0":1.43},
+        {"delta":5,"m1":1.058,"m0":2.518},{"delta":5,"m1":1.091,"m0":1.783},{"delta":5,"m1":0.843,"m0":1.165},
+        {"delta":5,"m1":1.111,"m0":0.86},{"delta":5,"m1":1.131,"m0":0.782},{"delta":6,"m1":1.215,"m0":1.377},
+        {"delta":6,"m1":1.191,"m0":1.378},{"delta":6,"m1":1.232,"m0":1.426},{"delta":6,"m1":1.268,"m0":1.908},
+        {"delta":6,"m1":1.215,"m0":1.377},{"delta":6,"m1":1.155,"m0":0.713},{"delta":6,"m1":1.261,"m0":1.538},
+        {"delta":6,"m1":1.316,"m0":1.252},{"delta":6,"m1":1.313,"m0":1.767},{"delta":6,"m1":1.212,"m0":1.956},
+        {"delta":6,"m1":1.214,"m0":0.831},{"delta":6,"m1":1.282,"m0":1.785},{"delta":7,"m1":1.464,"m0":1.526},
+        {"delta":8,"m1":1.472,"m0":0.997},{"delta":8,"m1":1.621,"m0":1.288},{"delta":8,"m1":1.599,"m0":1.177},
+        {"delta":8,"m1":1.503,"m0":1.267},{"delta":8,"m1":1.534,"m0":2.009},{"delta":8,"m1":1.603,"m0":1.236},
+        {"delta":8,"m1":1.583,"m0":0.879},{"delta":8,"m1":1.517,"m0":1.094},{"delta":8,"m1":1.444,"m0":1.897},
+        {"delta":8,"m1":1.603,"m0":1.231},{"delta":8,"m1":1.523,"m0":0.793},{"delta":10,"m1":1.443,"m0":0.733},
+        {"delta":11,"m1":2.261,"m0":1.095},{"delta":11,"m1":2.279,"m0":0.635},{"delta":12,"m1":1.951,"m0":1.014},
+        {"delta":12,"m1":2.554,"m0":0.232}
+    ]
+};
+
+// Compact mode: condense content, highlight the essential figures clearly
+function aeDrawTensionCompact(chord, prev, p) {
+    aeHeader('TENSION CONSTRAINT', 'TEST ρ +0.97');
+
+    if (!prev) {
+        aeText('first chord — awaiting transition', AE_W / 2, 85,
+            { size: 8, color: aeColors.faint, align: 'center' });
+        return;
+    }
+
+    const t = aeTps(aeChordKey(prev), aeChordKey(chord));
+    const d = euclideanDistance(prev.coords, chord.coords);
+    const res = d - t.delta;
+    const a = Math.min(1, p / 0.5);
+
+    // Transition header
+    aeText(`${prev.label} → ${chord.label}`, 16, 36,
+        { size: 9, weight: 600, color: aeColors.ink });
+    const statusText = Math.abs(res) < 0.5 ? 'close agreement' : (res < 0 ? 'closer than theory' : 'further than theory');
+    aeText(statusText, AE_W - 16, 36, { size: 7.5, color: aeColors.dim, align: 'right' });
+
+    // Two prominent metric cards
+    // 1. Theory card
+    aeCtx.fillStyle = aeRgba(aeColors.ground, 0.6);
+    aeRoundRect(aeCtx, 16, 46, 168, 54, 3);
+    aeCtx.fill();
+    aeCtx.strokeStyle = aeRgba(aeColors.line, 0.7);
+    aeCtx.stroke();
+
+    aeText('δ THEORY (TPS)', 26, 59, { size: 7.5, weight: 600, color: aeColors.tps });
+    aeText(t.delta.toFixed(2), 26, 78, { size: 18, weight: 700, color: aeColors.tps });
+    aeText(`j: ${t.j} (5ths) + k: ${t.k} (tones)`, 26, 92, { size: 7, color: aeColors.dim });
+
+    // 2. Model card
+    aeCtx.fillStyle = aeRgba(aeColors.ground, 0.6);
+    aeRoundRect(aeCtx, 196, 46, 168, 54, 3);
+    aeCtx.fill();
+    aeCtx.strokeStyle = aeRgba(aeColors.line, 0.7);
+    aeCtx.stroke();
+
+    aeText('‖Δz‖ MODEL DIST', 206, 59, { size: 7.5, weight: 600, color: aeColors.accent });
+    aeText(d.toFixed(2), 206, 78, { size: 18, weight: 700, color: aeColors.accent });
+    const resCol = Math.abs(res) < 1 ? aeColors.ok : aeColors.neg;
+    aeText(`res ${(res >= 0 ? '+' : '') + res.toFixed(2)}  (L_TPS ${(res * res).toFixed(3)})`, 206, 92,
+        { size: 7, weight: 600, color: resCol });
+
+    // Comparative progress gauge bar
+    const bx = 16, bw = 348;
+    aeCtx.fillStyle = aeRgba(aeColors.line, 0.4);
+    aeRoundRect(aeCtx, bx, 108, bw, 6, 2);
+    aeCtx.fill();
+
+    const tw = Math.max(2, Math.min(bw, (t.delta / 12) * bw));
+    aeCtx.fillStyle = aeRgba(aeColors.tps, 0.85);
+    aeRoundRect(aeCtx, bx, 108, tw * a, 6, 2);
+    aeCtx.fill();
+
+    const mw = Math.max(0, Math.min(bw, (d / 12) * bw));
+    aeCtx.fillStyle = aeColors.accent;
+    aeRoundRect(aeCtx, bx + mw * a - 1.5, 106, 3, 10, 1);
+    aeCtx.fill();
+
+    // Research benchmark strip
+    aeCtx.strokeStyle = aeRgba(aeColors.line, 0.5);
+    aeCtx.beginPath();
+    aeCtx.moveTo(16, 124);
+    aeCtx.lineTo(364, 124);
+    aeCtx.stroke();
+
+    aeText('TEST TPS ρ', 16, 137, { size: 7, color: aeColors.faint });
+    aeText('+0.970', 16, 150, { size: 9.5, weight: 700, color: aeColors.ok });
+
+    aeText('K&K KEY ρ', 145, 137, { size: 7, color: aeColors.faint });
+    aeText('+0.763', 145, 150, { size: 9.5, weight: 700, color: aeColors.accent });
+
+    aeText('TEST TPS MSE', 274, 137, { size: 7, color: aeColors.faint });
+    aeText('0.392', 274, 150, { size: 9.5, weight: 700, color: aeColors.tps });
+}
+
+// Expanded mode: keep full mathematical breakdown and full static 2D scatter plot
+function aeDrawTensionExpanded(chord, prev, p) {
     aeHeader('TENSION CONSTRAINT', 'L = L_recon + λ·L_TPS');
 
     const LX = 14, LR = 208;
@@ -479,35 +557,30 @@ function aeDrawTension(chord, prev, p) {
             aeText(r[0], LX, y, { size: 7.5, color: aeColors.faint });
             aeText(r[1], LR, y, { size: 8.5, weight: 600, color: r[2], align: 'right' });
         });
-        aeText('trained to pull d toward δ', LX, 190, { size: 7, color: aeColors.ok });
+        aeText('trained to pull d toward δ (λ=1)', LX, 190, { size: 7, color: aeColors.ok });
     } else {
         aeText('first chord — no pair yet', LX, 56, { size: 7.5, color: aeColors.faint });
     }
 
-    aeDrawScatter(234, 44, 138, p);
+    // Right side: static 2D scatter benchmark plot (no chord-wipe animation)
+    aeDrawScatter(234, 44, 138);
 }
 
-// delta-vs-distance scatter over the whole progression, M2 against the
-// unconstrained baseline. The two models' latent spaces have unrelated scales,
-// so each is divided by its own mean pair distance: only the RELATIONSHIP to
-// the theoretical distance is comparable, never the raw coordinates.
-function aeDrawScatter(sx, sy, ss, p) {
+// 2D Scatter plot: fixed static plot from TRACE-Research held-out test benchmark
+function aeDrawScatter(sx, sy, ss) {
     aeCtx.strokeStyle = aeRgba(aeColors.line, 1);
     aeCtx.lineWidth = 0.7;
     aeCtx.strokeRect(sx, sy, ss, ss);
 
-    const pairs = aeScatterPairs();
-    if (!pairs || pairs.n < 3) {
-        aeText('need 3+ chords', sx + ss / 2, sy + ss / 2,
-            { size: 7.5, color: aeColors.faint, align: 'center' });
-        return;
-    }
-    const maxD = pairs.maxDelta * 1.12;
-    const maxM = pairs.maxNorm * 1.12;
+    const b = AE_BENCHMARK_DATA;
+    const pairs = b.pairs;
+    const maxD = 13.5;
+    const maxM = 2.85;
     const px = (v) => sx + (v / maxD) * ss;
     const py = (v) => sy + ss - (v / maxM) * ss;
 
-    aeCtx.strokeStyle = aeRgba(aeColors.faint, 0.5);
+    // Diagonal target reference line
+    aeCtx.strokeStyle = aeRgba(aeColors.faint, 0.45);
     aeCtx.setLineDash([2, 2]);
     aeCtx.lineWidth = 0.6;
     aeCtx.beginPath();
@@ -516,78 +589,50 @@ function aeDrawScatter(sx, sy, ss, p) {
     aeCtx.stroke();
     aeCtx.setLineDash([]);
 
-    pairs.list.forEach((q, i) => {
-        const app = Math.max(0, Math.min(1, (p - (i / pairs.n) * 0.5) / 0.5));
-        if (app <= 0) return;
-        if (pairs.hasM0) {
-            aeCtx.beginPath();
-            aeCtx.arc(px(q.delta), py(q.m0), 2.1 * app, 0, Math.PI * 2);
-            aeCtx.fillStyle = aeRgba(aeColors.neg, 0.55 * app);
-            aeCtx.fill();
-        }
+    // Draw baseline (λ=0) points (unconstrained baseline, ρ = +0.50)
+    pairs.forEach((q) => {
         aeCtx.beginPath();
-        aeCtx.arc(px(q.delta), py(q.m2), 2.6 * app, 0, Math.PI * 2);
-        aeCtx.fillStyle = aeRgba(aeColors.accent, 0.85 * app);
+        aeCtx.arc(px(q.delta), py(q.m0), 1.9, 0, Math.PI * 2);
+        aeCtx.fillStyle = aeRgba(aeColors.neg, 0.45);
+        aeCtx.fill();
+    });
+
+    // Draw Full15 (λ=1) points (TPS regularized, ρ = +0.97)
+    pairs.forEach((q) => {
+        aeCtx.beginPath();
+        aeCtx.arc(px(q.delta), py(q.m1), 2.4, 0, Math.PI * 2);
+        aeCtx.fillStyle = aeRgba(aeColors.accent, 0.88);
         aeCtx.fill();
     });
 
     aeText('‖Δz‖ / mean ↑', sx, sy - 6, { size: 7, color: aeColors.faint });
-    aeText('δ →', sx + ss, sy + ss + 11, { size: 7, color: aeColors.faint, align: 'right' });
-    aeText(`${pairs.n} pairs`, sx + ss, sy - 6, { size: 7, color: aeColors.faint, align: 'right' });
+    aeText('δ (TPS) →', sx + ss, sy + ss + 11, { size: 7, color: aeColors.faint, align: 'right' });
+    aeText(`${pairs.length} test pairs · held-out`, sx + ss, sy - 6, { size: 7, color: aeColors.faint, align: 'right' });
 
-    // legend (two series must never be told apart by colour alone)
-    let ly = sy + ss + 24;
-    aeCtx.fillStyle = aeRgba(aeColors.accent, 0.9);
-    aeCtx.beginPath(); aeCtx.arc(sx + 3, ly - 2.5, 2.6, 0, Math.PI * 2); aeCtx.fill();
-    aeText(`M2 ρ ${pairs.rhoM2 >= 0 ? '+' : ''}${pairs.rhoM2.toFixed(2)}`, sx + 9, ly,
-        { size: 7.5, weight: 600, color: pairs.rhoM2 > 0.5 ? aeColors.ok : aeColors.tps });
-    if (pairs.hasM0) {
-        ly += 11;
-        aeCtx.fillStyle = aeRgba(aeColors.neg, 0.75);
-        aeCtx.beginPath(); aeCtx.arc(sx + 3, ly - 2.5, 2.1, 0, Math.PI * 2); aeCtx.fill();
-        aeText(`M0 ρ ${pairs.rhoM0 >= 0 ? '+' : ''}${pairs.rhoM0.toFixed(2)}`, sx + 9, ly,
-            { size: 7.5, color: aeColors.neg });
-    }
+    // Legend
+    let ly = sy + ss + 23;
+    aeCtx.fillStyle = aeRgba(aeColors.accent, 0.95);
+    aeCtx.beginPath(); aeCtx.arc(sx + 3, ly - 2.5, 2.5, 0, Math.PI * 2); aeCtx.fill();
+    aeText(`Full15 (λ=1) ρ +${b.meta.full15_rho.toFixed(2)} (MSE ${b.meta.full15_tps_mse.toFixed(2)})`, sx + 9, ly,
+        { size: 7.5, weight: 600, color: aeColors.ok });
+
+    ly += 11;
+    aeCtx.fillStyle = aeRgba(aeColors.neg, 0.75);
+    aeCtx.beginPath(); aeCtx.arc(sx + 3, ly - 2.5, 2.0, 0, Math.PI * 2); aeCtx.fill();
+    aeText(`Baseline (λ=0) ρ +${b.meta.baseline_rho.toFixed(2)} (MSE ${b.meta.baseline_tps_mse.toFixed(1)})`, sx + 9, ly,
+        { size: 7.5, color: aeColors.neg });
+
+    ly += 11;
+    aeText(`K&K ρ +${b.meta.full15_kk_rho.toFixed(2)} · B&P ρ +${b.meta.full15_bp_rho.toFixed(2)}`, sx + 9, ly,
+        { size: 7, color: aeColors.dim });
 }
 
-// Cached per progression identity - the forward passes are cheap but there is
-// no reason to redo the whole piece every frame.
-let _aeScatterRef = null, _aeScatterVal = null;
-function aeScatterPairs() {
-    if (_aeScatterRef === progression && _aeScatterVal) return _aeScatterVal;
-    _aeScatterRef = progression;
-    _aeScatterVal = null;
-    if (!aeModel || progression.length < 4) return null;
-
-    const hasM0 = !!aeModel.m0;
-    const list = [];
-    let prevKey = null, prevZ0 = null;
-    for (let i = 0; i < progression.length; i++) {
-        const key = aeChordKey(progression[i]);
-        const z0 = hasM0 ? aeForward('m0', key).z : null;
-        if (prevKey) {
-            const t = aeTps(prevKey, key);
-            const m2 = euclideanDistance(progression[i - 1].coords, progression[i].coords);
-            const m0 = hasM0 ? Math.hypot(z0[0] - prevZ0[0], z0[1] - prevZ0[1], z0[2] - prevZ0[2]) : 0;
-            list.push({ delta: t.delta, m2, m0 });
-        }
-        prevKey = key;
-        prevZ0 = z0;
+function aeDrawTension(chord, prev, p) {
+    if (aeState === 'expanded') {
+        aeDrawTensionExpanded(chord, prev, p);
+    } else {
+        aeDrawTensionCompact(chord, prev, p);
     }
-    if (list.length < 3) return null;
-
-    const mean = (sel) => list.reduce((s, q) => s + sel(q), 0) / list.length || 1;
-    const m2Mean = mean(q => q.m2), m0Mean = mean(q => q.m0) || 1;
-    list.forEach(q => { q.m2 /= m2Mean; q.m0 /= m0Mean; });
-
-    _aeScatterVal = {
-        list, n: list.length, hasM0,
-        maxDelta: Math.max(...list.map(q => q.delta)) || 1,
-        maxNorm: Math.max(...list.map(q => Math.max(q.m2, hasM0 ? q.m0 : 0))) || 1,
-        rhoM2: aeSpearman(list.map(q => q.delta), list.map(q => q.m2)),
-        rhoM0: hasM0 ? aeSpearman(list.map(q => q.delta), list.map(q => q.m0)) : NaN
-    };
-    return _aeScatterVal;
 }
 
 // ------------------------------------------------------------------- driver
@@ -599,9 +644,132 @@ function markAeVizDirty() {
     aeDirty = true;
 }
 
+function setAeView(view) {
+    if (aeView === view) return;
+    aeView = view;
+    document.querySelectorAll('#aeTabs .ae-tab-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.view === view);
+    });
+    aeResize();
+    aeAnimStart = performance.now();
+    aeDirty = true;
+}
+
+function toggleAeMin() {
+    const panel = document.getElementById('aePanel');
+    const minBtn = document.getElementById('aeMinBtn');
+    const zoomBtn = document.getElementById('aeZoomBtn');
+    if (!panel || !minBtn) return;
+
+    const isMin = panel.classList.toggle('minimized');
+    minBtn.innerHTML = isMin ? '+' : '&ndash;';
+    minBtn.title = isMin ? 'Expand' : 'Minimise';
+
+    if (isMin && aeState === 'expanded') {
+        aeState = 'panel';
+        panel.classList.remove('expanded');
+        if (zoomBtn) {
+            zoomBtn.innerHTML = '&#x2922;';
+            zoomBtn.title = 'Maximize';
+        }
+    }
+
+    if (!isMin) {
+        aeResize();
+        aeAnimStart = performance.now();
+        aeDirty = true;
+    }
+}
+
+function toggleAeZoom() {
+    const panel = document.getElementById('aePanel');
+    const zoomBtn = document.getElementById('aeZoomBtn');
+    const minBtn = document.getElementById('aeMinBtn');
+    if (!panel || !zoomBtn) return;
+
+    // If currently minimized, expand first
+    if (panel.classList.contains('minimized')) {
+        panel.classList.remove('minimized');
+        if (minBtn) {
+            minBtn.innerHTML = '&ndash;';
+            minBtn.title = 'Minimise';
+        }
+    }
+
+    if (aeState === 'expanded') {
+        aeState = 'panel';
+        panel.classList.remove('expanded');
+        zoomBtn.innerHTML = '&#x2922;';
+        zoomBtn.title = 'Maximize';
+    } else {
+        aeState = 'expanded';
+        panel.classList.add('expanded');
+        zoomBtn.innerHTML = '&#x2921;';
+        zoomBtn.title = 'Restore';
+        requestAnimationFrame(() => {
+            panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+    }
+    aeResize();
+    aeAnimStart = performance.now();
+    aeDirty = true;
+}
+
+function bindAePanel() {
+    const minBtn = document.getElementById('aeMinBtn');
+    const zoomBtn = document.getElementById('aeZoomBtn');
+    const tabs = document.querySelectorAll('#aeTabs .ae-tab-btn');
+
+    if (minBtn) {
+        minBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleAeMin();
+        };
+    }
+    if (zoomBtn) {
+        zoomBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleAeZoom();
+        };
+    }
+    tabs.forEach(btn => {
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            const v = btn.dataset.view;
+            if (v) setAeView(v);
+        };
+    });
+}
+
 function updateAeViz() {
     if (!aeCanvas || !aeVisible || !aeModel) return;
     aeSyncColors();   // before the dirty check: a theme switch sets aeDirty
+
+    const chord = progression[currentIndex];
+
+    // Update HTML readouts
+    const infoEl = document.getElementById('aeInfo');
+    if (infoEl) {
+        if (aeView === 'forward') {
+            infoEl.textContent = chord ? `· ${chord.label}` : '';
+        } else {
+            infoEl.textContent = '· ρ = +0.970 benchmark';
+        }
+    }
+    const sumChord = document.getElementById('aeSummaryChord');
+    const sumZ = document.getElementById('aeSummaryZ');
+    if (sumChord) sumChord.textContent = chord ? (chord.absLabel || chord.label) : '–';
+    if (sumZ && chord) {
+        const z = chord.coords;
+        sumZ.textContent = `z = (${z[0].toFixed(2)}, ${z[1].toFixed(2)}, ${z[2].toFixed(2)})`;
+    }
+
+    const panel = document.getElementById('aePanel');
+    if (panel && panel.classList.contains('minimized')) {
+        aeDirty = false;
+        return;
+    }
+
     const animating = performance.now() - aeAnimStart < AE_ANIM_MS;
     if (!aeDirty && !animating) return;
 
@@ -609,13 +777,6 @@ function updateAeViz() {
     const [lw, lh] = aeLogicalSize();
     aeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     aeCtx.clearRect(0, 0, lw, lh);
-
-    const chord = progression[currentIndex];
-    if (aeState === 'pill') {
-        aeDrawPill(chord);
-        aeDirty = false;
-        return;
-    }
 
     // No border: the panel is meant to sit in the starfield, not on top of it
     aeCtx.fillStyle = aeColors.ground;
@@ -653,8 +814,9 @@ function aeOnClick(ev) {
     for (const h of aeHitRegions) {
         if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) {
             const [kind, value] = h.action.split(':');
-            if (kind === 'view') { aeView = value; aeResize(); }
-            else { aeState = value; aeResize(); }
+            if (kind === 'view') { setAeView(value); }
+            else if (value === 'expanded') { toggleAeZoom(); }
+            else if (value === 'pill') { toggleAeMin(); }
             aeAnimStart = performance.now();
             aeDirty = true;
             ev.stopPropagation();
@@ -700,8 +862,10 @@ async function initAeViz() {
     aeCanvas.addEventListener('pointermove', aeOnMove);
     aeCanvas.addEventListener('pointerleave', () => { aeHover = null; aeDirty = true; });
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && aeState === 'expanded') { aeState = 'panel'; aeResize(); }
+        if (e.key === 'Escape' && aeState === 'expanded') { toggleAeZoom(); }
     });
+    window.addEventListener('resize', () => { aeResize(); });
+    bindAePanel();
     aeSyncColors();
     aeResize();
     try {
