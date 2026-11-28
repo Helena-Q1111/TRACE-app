@@ -223,16 +223,14 @@ function getChordLabel(chord) {
 // ---- RNA-style roman numeral label (degree + extension figures) ----
 // Case/°/+ come from romanDegree; minor-ness is implied by lowercase so
 // min7 -> "ii7" (not iim7). m7b5 uses the half-diminished slash ø.
-// Inversions are appended as the chord member in the bass: /3 /5 /7 ...
+// The slash gives the bass's simple interval from the chord root: /2 /3 /5 ...
 const RNA_SUFFIX = qualityField('rna');
 const BASS_MEMBER = {
-    3: '3', 4: '3', 7: '5', 10: '7', 11: '7',
-    2: '9', 5: '11', 9: '13', 6: '♭5', 8: '♯5'
+    1: '♭2', 2: '2', 3: '3', 4: '3', 5: '4', 6: '♭5',
+    7: '5', 8: '♯5', 9: '6', 10: '7', 11: '7'
 };
 
-// Roman-numeral label. `withTensions` is off for the 3D sprites - label space
-// in the scene is tight and "V7(♯11)/3" turns into mush - and on for the
-// sidebar, where the full reading is useful.
+// Roman-numeral label with optional extension figures and a simple bass interval.
 function romanLabel(chord, k, withTensions) {
     let name = romanDegree(chord, k);
     if (chord.quality === 'm7b5') name = name.replace('°', 'ø');
@@ -241,7 +239,7 @@ function romanLabel(chord, k, withTensions) {
     const bass = chord.bass ?? chord.root;
     if (bass !== chord.root) {
         const iv = ((bass - chord.root) % 12 + 12) % 12;
-        name += '/' + (BASS_MEMBER[iv] ?? PITCH_NAMES[bass]);
+        name += '/' + BASS_MEMBER[iv];
     }
     return name;
 }

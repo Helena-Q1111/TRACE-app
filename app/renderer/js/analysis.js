@@ -58,7 +58,9 @@ const ANALYSIS_CFG = {
     bassRootSeventhMin: 0.25, // and its 7th this one
     bassRootSubstantial: 0.2, // a tone at this fraction of the loudest must be explained by a bass-rooted reading
     rootBassBonus: 0.05,     // cosine-scale bonus when root == the segment bass
-    inversionMinRatio: 0.55, // bass must carry this much weight (vs max) to flag inversion
+    inversionMinRatio: 0.55, // initial bass estimate used when merging identical spans
+    inversionBassShare: 0.50, // part of the span's sounding time supported by the candidate bass
+    tensionBassShare: 0.65,   // a tension in the bass needs stronger evidence than a core chord tone
     // A tension counts when it is at least this strong relative to the MEAN
     // weight of the chord's own sounding tones. Deliberately not a fraction of
     // the peak: bassBoost, the downbeat weight and the bass note's longer
@@ -158,6 +160,7 @@ function analyzeMidiToSegments(notes, bpb) {
         const chroma = Array.from({ length: n }, () => new Float32Array(12));
         const lowPitch = Array.from({ length: n }, () => new Float32Array(12).fill(Infinity));
         const lowDur = new Float32Array(n);      // duration of the note that is the unit's lowest
+        const lowestOverlap = new Float32Array(n);
         const lowest = new Float32Array(n).fill(Infinity);
         notes.forEach((nt) => {
             for (let u = at(nt.startBeat); u < n && start[u] < nt.endBeat; u++) {
@@ -166,7 +169,13 @@ function analyzeMidiToSegments(notes, bpb) {
                 const pc = nt.pitch % 12;
                 chroma[u][pc] += ov * metric[u];
                 if (nt.pitch < lowPitch[u][pc]) lowPitch[u][pc] = nt.pitch;
-                if (nt.pitch < lowest[u]) { lowest[u] = nt.pitch; lowDur[u] = nt.endBeat - nt.startBeat; }
+                if (nt.pitch < lowest[u]) {
+                    lowest[u] = nt.pitch;
+                    lowDur[u] = nt.endBeat - nt.startBeat;
+                    lowestOverlap[u] = ov;
+                } else if (nt.pitch === lowest[u]) {
+                    lowestOverlap[u] += ov;
+                }
             }
         });
         // The lowest sounding pitch class of each unit (-1 = silent)
@@ -246,7 +255,18 @@ function analyzeMidiToSegments(notes, bpb) {
             if (oneBass) lineBass.forEach((pc) => { if (pc !== bp) foreignBass.push([pc, asBass[pc]]); });
             return { w, wPlain, lowPitch: lp, total, bassPc: bp, foreignBass };
         }
-        return { start, end, n, attack, at, chroma, lowPitch, lowest, bassPc, structBass, measure };
+
+        function bassShare(pc, s, e) {
+            let support = 0, sounding = 0;
+            for (let u = s; u < e; u++) {
+                const duration = end[u] - start[u];
+                // Estimate sounding time without counting silence after a staccato chord.
+                sounding += Math.min(duration * metric[u], Math.max(...chroma[u]));
+                if (bassPc[u] === pc) support += Math.min(duration, lowestOverlap[u]) * metric[u];
+            }
+            return sounding ? support / sounding : 0;
+        }
+        return { start, end, n, attack, at, chroma, lowPitch, lowest, bassPc, structBass, measure, bassShare };
     }
     const grid = makeTable(gridTimes);
     const fine = makeTable(fineTimes);
@@ -628,6 +648,16 @@ function analyzeMidiToSegments(notes, bpb) {
     });
 
     merged.forEach((seg) => {
+        // Check the confirmed span so stricter slash-bass labels cannot move
+        // or remove a chord boundary. Upper-voice occurrences of the bass
+        // pitch class do not count as evidence here.
+        if (seg.bass !== seg.root) {
+            const bassInterval = (seg.bass - seg.root + 12) % 12;
+            const minShare = CORE_TONES[seg.quality].includes(bassInterval)
+                ? CFG.inversionBassShare : CFG.tensionBassShare;
+            const from = fine.at(seg.startBeat), to = fine.at(seg.endBeat - 1e-6) + 1;
+            if (fine.bassShare(seg.bass, from, to) < minShare) seg.bass = seg.root;
+        }
         seg.durBeats = seg.endBeat - seg.startBeat;
         seg.bar = Math.floor(seg.startBeat / bpb) + 1;
         seg.beatInBar = seg.startBeat - (seg.bar - 1) * bpb;
