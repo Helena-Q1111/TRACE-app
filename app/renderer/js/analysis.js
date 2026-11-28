@@ -59,8 +59,9 @@ const ANALYSIS_CFG = {
     bassRootSubstantial: 0.2, // a tone at this fraction of the loudest must be explained by a bass-rooted reading
     rootBassBonus: 0.05,     // cosine-scale bonus when root == the segment bass
     inversionMinRatio: 0.55, // initial bass estimate used when merging identical spans
-    inversionBassShare: 0.50, // part of the span's sounding time supported by the candidate bass
-    tensionBassShare: 0.65,   // a tension in the bass needs stronger evidence than a core chord tone
+    inversionBassShare: 0.70, // minimum share of sounding time supported by the candidate bass
+    unusualBassShare: 0.85,   // a suspended or added tone needs stronger evidence in the bass
+    inversionRootRatio: 0.50, // the chord root must carry at least half the bass pitch class's weight
     // A tension counts when it is at least this strong relative to the MEAN
     // weight of the chord's own sounding tones. Deliberately not a fraction of
     // the peak: bassBoost, the downbeat weight and the bass note's longer
@@ -653,10 +654,30 @@ function analyzeMidiToSegments(notes, bpb) {
         // pitch class do not count as evidence here.
         if (seg.bass !== seg.root) {
             const bassInterval = (seg.bass - seg.root + 12) % 12;
-            const minShare = CORE_TONES[seg.quality].includes(bassInterval)
-                ? CFG.inversionBassShare : CFG.tensionBassShare;
+            const core = CORE_TONES[seg.quality];
+            const suspension = bassInterval === SUSPENDED_INTERVAL[seg.quality];
+            const unusualBass = suspension || !core.includes(bassInterval);
             const from = fine.at(seg.startBeat), to = fine.at(seg.endBeat - 1e-6) + 1;
-            if (fine.bassShare(seg.bass, from, to) < minShare) seg.bass = seg.root;
+            const share = fine.bassShare(seg.bass, from, to);
+            const m = fine.measure(from, to);
+            const minToneWeight = CFG.inversionRootRatio * m.wPlain[seg.bass];
+
+            // Gsus4/C and Csus2 spell exactly the same three notes. If all
+            // three are substantial, prefer the spelling rooted in the bass.
+            if (seg.quality === 'sus4' && suspension && share >= CFG.inversionBassShare) {
+                const alt = describeChord(m, { root: seg.bass, quality: 'sus2', forcedTensionPc: -1 });
+                if (alt.pcs.join(',') === seg.pcs.join(',')
+                    && CORE_TONES.sus2.every(iv => m.wPlain[(alt.root + iv) % 12] >= minToneWeight)) {
+                    Object.assign(seg, alt);
+                }
+            }
+            if (seg.bass !== seg.root) {
+                const minShare = unusualBass ? CFG.unusualBassShare : CFG.inversionBassShare;
+                const requiredTones = unusualBass ? core : [0];
+                if (share < minShare || requiredTones.some(iv => m.wPlain[(seg.root + iv) % 12] < minToneWeight)) {
+                    seg.bass = seg.root;
+                }
+            }
         }
         seg.durBeats = seg.endBeat - seg.startBeat;
         seg.bar = Math.floor(seg.startBeat / bpb) + 1;
